@@ -55,6 +55,8 @@ class MessageMeta(BaseModel):
     date: Optional[datetime] = None
     in_reply_to: Optional[str] = None
     references: list[str] = []
+    # Plaintext Message-ID: transient, used only for reply threading; never persisted.
+    message_id: Optional[str] = None
 
 
 class Classification(BaseModel):
