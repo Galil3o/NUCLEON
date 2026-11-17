@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import json
+
 import pytest
 
 from nucleon.config import JournalConfig
@@ -70,6 +72,9 @@ def test_file_contains_no_content(tmp_path):
     text = p.read_text()
     for secret in ("Secret subject", "hello body", "alice@example.com"):
         assert secret not in text
+    for line in text.splitlines():
+        if line.strip():
+            assert set(json.loads(line).keys()) == set(JournalEntry.model_fields)
 
 
 def test_build_journal_defaults_to_null():
@@ -84,3 +89,12 @@ def test_build_journal_file_backend(tmp_path):
 def test_build_journal_file_requires_path():
     with pytest.raises(ValueError, match="path"):
         build_journal(JournalConfig(enabled=True))
+
+
+def test_mark_sent_unknown_ref_is_noop(tmp_path):
+    store = FileJournalStore(str(tmp_path / "j.jsonl"))
+    j = StoredJournal(store)
+    j.record(make_entry())
+    before = store.entries()
+    j.mark_sent("unknown")
+    assert store.entries() == before
