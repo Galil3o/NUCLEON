@@ -59,3 +59,21 @@ def test_fake_classifier_returns_result():
     )
     assert isinstance(fake, Classifier)
     assert fake.classify(meta, "body") == result
+
+
+def test_error_message_does_not_echo_untrusted_content():
+    sentinel = "SENTINEL_UNTRUSTED_9f3"
+    bad = [
+        json.dumps({"category": "x", "labels": [], "urgency": "normal", "needs_reply": sentinel}),
+        json.dumps({sentinel: 1}),
+        "not json " + sentinel,
+    ]
+    for raw in bad:
+        with pytest.raises(ClassifierOutputError) as ei:
+            parse_classification(raw)
+        assert sentinel not in str(ei.value)
+
+
+def test_deeply_nested_json_maps_to_classifier_error():
+    with pytest.raises(ClassifierOutputError):
+        parse_classification("[" * 100000)

@@ -19,3 +19,15 @@ def test_load_example_config_is_valid():
 def test_missing_required_field_raises():
     with pytest.raises(ValidationError):
         Config.model_validate({"mail": {"host": "127.0.0.1"}})
+
+
+def test_unknown_key_raises():
+    base = {
+        "mail": {"mode": "imap", "host": "h", "port": 1, "username": "u"},
+        "classifier": {"endpoint": "e", "model": "m"},
+    }
+    Config.model_validate(base)
+    with pytest.raises(ValidationError):
+        Config.model_validate({**base, "bogus": 1})
+    with pytest.raises(ValidationError):
+        Config.model_validate({**base, "mail": {**base["mail"], "hots": "x"}})

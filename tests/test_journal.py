@@ -98,3 +98,13 @@ def test_mark_sent_unknown_ref_is_noop(tmp_path):
     before = store.entries()
     j.mark_sent("unknown")
     assert store.entries() == before
+
+
+def test_file_store_skips_corrupt_line(tmp_path):
+    path = tmp_path / "j.jsonl"
+    store = FileJournalStore(str(path))
+    store.append(make_entry("good"))
+    with open(path, "a", encoding="utf-8") as f:
+        f.write('{"ref_key": "trunc\n')
+    got = store.entries()
+    assert [e.ref_key for e in got] == ["good"]

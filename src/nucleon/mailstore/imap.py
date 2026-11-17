@@ -63,7 +63,7 @@ class ImapMailStore:
             self._conn.uid("SEARCH", None, "SINCE", _imap_date(since_days)), "SEARCH"
         )
         uids = [int(u) for u in (data[0] or b"").split()]
-        return uids[:limit]
+        return uids[-limit:] if limit > 0 else []
 
     def _fetch(self, uid: int, item: str) -> bytes:
         data = _check(self._conn.uid("FETCH", str(uid), item), "FETCH")

@@ -113,3 +113,34 @@ def test_gate_actions_are_within_allowed_set():
     c = _cls(needs_reply=True, draft_body="b")
     acts = decide(c, _meta(message_id="<in@x>"), cfg)
     assert acts and all(isinstance(a, ALLOWED) for a in acts)
+
+
+import pytest
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["a\r\nb", "a\x00b", "a\x7fb", "a b\tc", "x; DELETE", "", "a" * 65, 'q"r', "é"],
+)
+def test_invalid_labels_are_dropped(bad):
+    out = decide(_cls(labels=[bad, "ok/label 1.x_y-z"]), _meta(), _cfg())
+    labels = [a.label for a in out if isinstance(a, ApplyLabel)]
+    assert labels == ["ok/label 1.x_y-z"]
+
+
+def test_max_length_label_allowed():
+    out = decide(_cls(labels=["a" * 64]), _meta(), _cfg())
+    assert [a.label for a in out if isinstance(a, ApplyLabel)] == ["a" * 64]
+
+
+def test_draft_label_is_trusted_config():
+    cfg = Config.model_validate(
+        {
+            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+            "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
+            "draft": {"label": "my:odd label!"},
+        }
+    )
+    out = decide(_cls(needs_reply=True, draft_body="hi", labels=[]), _meta(), cfg)
+    drafts = [a for a in out if isinstance(a, StageDraft)]
+    assert drafts and drafts[0].label == "my:odd label!"

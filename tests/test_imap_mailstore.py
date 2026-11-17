@@ -54,7 +54,7 @@ def _ref(store):
 
 def test_list_window_searches_since_and_limits(store, conn):
     refs = store.list_window("INBOX", 7, 2)
-    assert [r.uid for r in refs] == [5, 6]
+    assert [r.uid for r in refs] == [6, 7]  # newest subset
     assert refs[0].uidvalidity == 77 and refs[0].mailbox == "INBOX"
     search = [c for c in conn.cmds if c[:2] == ("UID", "SEARCH")][0]
     assert search[2] is None and search[3] == "SINCE"
@@ -88,6 +88,8 @@ def test_fetch_meta_populates_message_id(store, conn):
 def test_list_sent_is_read_only(store, conn):
     metas = store.list_sent(30, 2)
     assert len(metas) == 2
+    fetched = [c[2] for c in conn.cmds if c[:2] == ("UID", "FETCH")]
+    assert fetched[0] == "6" and fetched[-1] == "7"
     assert ("SELECT", "Sent") in conn.cmds
     verbs = {c[1] for c in conn.cmds if c[0] == "UID"}
     assert verbs <= {"SEARCH", "FETCH"}
