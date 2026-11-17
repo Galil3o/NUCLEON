@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import ssl
 import sys
 from typing import Any, Callable
 
@@ -27,7 +28,15 @@ def build_default_deps(cfg: Config) -> tuple[Any, Any, Any]:
     password = os.environ.get("NUCLEON_IMAP_PASSWORD")
     if not password:
         raise RuntimeError("NUCLEON_IMAP_PASSWORD is not set")
-    conn = imaplib.IMAP4(cfg.mail.host, cfg.mail.port)
+    # Always use TLS so the password never travels in cleartext. Proton Bridge's
+    # self-signed cert may need a custom CA at live-acceptance time (deferred);
+    # verification is never disabled.
+    context = ssl.create_default_context()
+    if cfg.mail.port == 993 or "ssl" in cfg.mail.mode.lower():
+        conn = imaplib.IMAP4_SSL(cfg.mail.host, cfg.mail.port, ssl_context=context)
+    else:
+        conn = imaplib.IMAP4(cfg.mail.host, cfg.mail.port)
+        conn.starttls(ssl_context=context)
     conn.login(cfg.mail.username, password)
     account_hash = hashlib.sha256(cfg.mail.username.encode()).hexdigest()
     store = ImapMailStore(conn, account_hash)
