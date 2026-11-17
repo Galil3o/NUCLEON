@@ -1,0 +1,26 @@
+# Nucleon example configuration. Placeholder values only; copy and edit locally.
+mail:
+  mode: imap
+  host: 127.0.0.1
+  port: 1143
+  username: your-bridge-username   # password comes from the environment, never this file
+  mailbox: INBOX
+  since_days: 7
+  limit: 50
+
+classifier:
+  endpoint: http://127.0.0.1:11434   # local model endpoint
+  model: your-model-name
+
+draft:
+  target: outbox            # "outbox" or "drafts"
+  label: nucleon/proposed
+
+cleanup:
+  auto_trash_enabled: false
+  auto_trash_categories: []
+
+journal:
+  enabled: false
+  backend: file
+  path: null
