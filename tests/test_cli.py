@@ -46,17 +46,30 @@ def test_reconcile_subcommand_invokes_reconcile(tmp_path, capsys):
     rc = cli.main(["reconcile", "--config", _config(tmp_path)],
                   deps=lambda cfg: (FakeMailStore(), FakeClassifier(None), NullJournal()))
     assert rc == 0
-    assert "0" in capsys.readouterr().out
+    assert capsys.readouterr().out.strip() == "reconciled=0"
 
 
-def test_help_exits_zero(monkeypatch):
+def test_help_exits_zero():
+    calls = []
+
     def boom(cfg):
-        raise AssertionError("build_default_deps must not be called")
+        calls.append(cfg)
+        raise AssertionError("deps must not be called")
 
-    monkeypatch.setattr(cli, "build_default_deps", boom)
     with pytest.raises(SystemExit) as exc:
-        cli.main(["--help"])
+        cli.main(["--help"], deps=boom)
     assert exc.value.code == 0
+    assert calls == []
+
+
+def test_run_returns_one_on_deps_error(tmp_path, capsys):
+    def raising(cfg):
+        raise RuntimeError("no server")
+
+    rc = cli.main(["run", "--config", _config(tmp_path)], deps=raising)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "no server" in err and "Traceback" not in err
 
 
 def test_missing_config_returns_error(tmp_path, capsys):
