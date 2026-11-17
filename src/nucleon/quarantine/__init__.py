@@ -21,14 +21,14 @@ class Classifier(Protocol):
 def parse_classification(raw: str) -> Classification:
     try:
         data = json.loads(raw)
-    except (json.JSONDecodeError, TypeError) as e:
-        raise ClassifierOutputError(f"output is not valid JSON: {e}") from e
+    except (ValueError, TypeError, RecursionError) as e:
+        raise ClassifierOutputError("classifier output is not valid JSON") from e
     if not isinstance(data, dict):
         raise ClassifierOutputError("output JSON is not an object")
     extra = set(data) - set(Classification.model_fields)
     if extra:
-        raise ClassifierOutputError(f"unexpected fields: {sorted(extra)}")
+        raise ClassifierOutputError("classifier output failed validation")
     try:
         return Classification.model_validate(data, strict=True)
     except ValidationError as e:
-        raise ClassifierOutputError(f"invalid classification: {e}") from e
+        raise ClassifierOutputError("classifier output failed validation") from e

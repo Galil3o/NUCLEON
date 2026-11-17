@@ -34,9 +34,15 @@ class FileJournalStore:
         if not os.path.exists(self._path):
             return []
         with open(self._path, encoding="utf-8") as f:
-            return [
-                JournalEntry.model_validate_json(line) for line in f if line.strip()
-            ]
+            out: list[JournalEntry] = []
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    out.append(JournalEntry.model_validate_json(line))
+                except ValueError:
+                    continue  # tolerate a corrupt/partial line
+            return out
 
 
 class Journal(Protocol):

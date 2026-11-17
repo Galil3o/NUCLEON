@@ -6,6 +6,8 @@ types in ``Action`` exist (no send, no permanent delete).
 """
 from __future__ import annotations
 
+import re
+
 from nucleon.config import Config
 from nucleon.models import (
     Action,
@@ -17,8 +19,23 @@ from nucleon.models import (
 )
 
 
+_LABEL_RE = re.compile(r"^[A-Za-z0-9 _/.-]+$")
+
+
+def _is_valid_label(label: str) -> bool:
+    """Model-derived labels reach an IMAP COPY argument; validate here, not in imaplib."""
+    if not label or len(label) > 64:
+        return False
+    if any(ord(c) < 0x20 or ord(c) == 0x7F for c in label):
+        return False
+    return _LABEL_RE.fullmatch(label) is not None
+
+
 def decide(classification: Classification, meta: MessageMeta, cfg: Config) -> list[Action]:
-    actions: list[Action] = [ApplyLabel(ref=meta.ref, label=l) for l in classification.labels]
+    actions: list[Action] = [ApplyLabel(ref=meta.ref, label=l)
+        for l in classification.labels
+        if _is_valid_label(l)
+    ]
 
     if classification.needs_reply and classification.draft_body:
         refs = list(meta.references)
