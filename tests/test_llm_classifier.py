@@ -18,7 +18,7 @@ GOOD = {
 
 def _meta() -> MessageMeta:
     return MessageMeta(
-        ref=MessageRef(account_hash="h", mailbox="INBOX", uidvalidity=1, uid=1),
+        ref=MessageRef(account_hash="h", mailbox="INBOX", uidvalidity=1, uid=1, raw_hash="r"),
         subject="Invoice 42",
         from_addr="a@example.com",
         to_addrs=["me@example.com"],
