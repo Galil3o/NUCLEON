@@ -1,0 +1,117 @@
+import hashlib
+
+from nucleon.config import Config
+from nucleon.engine import RunReport, reconcile, run_once
+from nucleon.journal import FileJournalStore, NullJournal, StoredJournal
+from nucleon.mailstore.fake import FakeMailStore
+from nucleon.models import Classification, MessageMeta, MessageRef
+from nucleon.quarantine.fake import FakeClassifier
+
+
+def _cfg(**cleanup) -> Config:
+    return Config.model_validate(
+        {
+            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+            "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
+            "cleanup": cleanup,
+        }
+    )
+
+
+def _meta(uid=1, mid="<in@x>", **kw) -> MessageMeta:
+    ref = MessageRef.from_source("a", "INBOX", 1, uid, mid, b"raw%d" % uid)
+    return MessageMeta(
+        ref=ref, subject="Hello", from_addr="a@b.c", to_addrs=["d@e.f"],
+        message_id=mid, **kw
+    )
+
+
+def _cls(**kw) -> Classification:
+    base = dict(category="personal", labels=["l1"], urgency="normal", needs_reply=False)
+    base.update(kw)
+    return Classification(**base)
+
+
+def _journal(tmp_path) -> StoredJournal:
+    return StoredJournal(FileJournalStore(str(tmp_path / "j.jsonl")))
+
+
+def test_run_once_labels_and_stages_one_draft(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks", labels=["l1", "l2"]))
+    report = run_once(store, clf, j, _cfg())
+    assert report == RunReport(processed=1, skipped=0, labeled=2, drafted=1, trashed=0)
+    assert len(store.appended_drafts) == 1
+    assert [l for _, l in store.labels if l in ("l1", "l2")] == ["l1", "l2"]
+    entries = j._store.entries()
+    assert len(entries) == 1 and entries[0].action == "drafted"
+
+
+def test_run_once_trashes_when_cleanup_enabled(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    m = _meta()
+    store.seed_inbox(m, "body")
+    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    report = run_once(store, FakeClassifier(_cls(category="newsletter")), j, cfg)
+    assert store.moved_to_trash == [m.ref]
+    assert report.trashed == 1
+    assert [e.action for e in j._store.entries()] == ["trashed"]
+
+
+def test_run_once_is_idempotent(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks"))
+    run_once(store, clf, j, _cfg())
+    report = run_once(store, clf, j, _cfg())
+    assert report.processed == 0 and report.skipped == 1
+    assert len(store.appended_drafts) == 1
+    assert len(j._store.entries()) == 1
+
+
+def test_run_once_classified_only(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    run_once(store, FakeClassifier(_cls()), j, _cfg())
+    assert [e.action for e in j._store.entries()] == ["classified"]
+
+
+def test_null_journal_drafted_unsent_empty():
+    assert NullJournal().drafted_unsent() == []
+
+
+def _drafted_setup(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    run_once(store, FakeClassifier(_cls(needs_reply=True, draft_body="Hi")), j, _cfg())
+    assert len(j.drafted_unsent()) == 1
+    return store, j
+
+
+def test_reconcile_marks_sent_when_matching_sent_appears(tmp_path):
+    store, j = _drafted_setup(tmp_path)
+    sent_ref = MessageRef.from_source("a", "Sent", 1, 9, "<out@x>", b"s")
+    store.seed_sent(
+        MessageMeta(ref=sent_ref, subject="Re: Hello", from_addr="d@e.f",
+                    to_addrs=["a@b.c"], in_reply_to="<in@x>")
+    )
+    assert hashlib.sha256(b"<in@x>").hexdigest() == j.drafted_unsent()[0].message_id_hash
+    assert reconcile(store, j, _cfg()) == 1
+    assert j.drafted_unsent() == []
+    assert reconcile(store, j, _cfg()) == 0
+
+
+def test_reconcile_no_match_marks_nothing(tmp_path):
+    store, j = _drafted_setup(tmp_path)
+    sent_ref = MessageRef.from_source("a", "Sent", 1, 9, "<out@x>", b"s")
+    store.seed_sent(
+        MessageMeta(ref=sent_ref, subject="Re: Other", from_addr="d@e.f",
+                    to_addrs=["a@b.c"], in_reply_to="<other@x>")
+    )
+    store.seed_sent(
+        MessageMeta(ref=MessageRef.from_source("a", "Sent", 1, 10, None, b"t"),
+                    subject="s", from_addr="d@e.f", to_addrs=["a@b.c"])
+    )
+    assert reconcile(store, j, _cfg()) == 0
+    assert len(j.drafted_unsent()) == 1
