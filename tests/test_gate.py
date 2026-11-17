@@ -50,6 +50,7 @@ def test_labels_and_draft_emitted_when_reply_needed():
     assert d.target == "outbox" and d.label == "nucleon/proposed"
     assert d.in_reply_to == "<in@x>"
     assert d.references == ("<r0@x>", "<in@x>")
+    assert d.to == meta.from_addr
 
 
 def test_draft_subject_defaults_and_no_duplicate_reference():

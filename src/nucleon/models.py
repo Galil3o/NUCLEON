@@ -81,6 +81,7 @@ class StageDraft(BaseModel):
     ref: MessageRef
     subject: str
     body: str
+    to: Optional[str] = None
     in_reply_to: Optional[str] = None
     references: tuple[str, ...] = ()
     target: str

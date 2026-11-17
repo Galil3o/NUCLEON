@@ -29,6 +29,7 @@ def decide(classification: Classification, meta: MessageMeta, cfg: Config) -> li
                 ref=meta.ref,
                 subject=classification.draft_subject or ("Re: " + meta.subject),
                 body=classification.draft_body,
+                to=meta.from_addr,
                 in_reply_to=meta.message_id,
                 references=tuple(refs),
                 target=cfg.draft.target,
