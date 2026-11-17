@@ -94,7 +94,13 @@ point for a later **user-approved send path** — for people who want even lower
 friction. Any such path re-introduces a send capability, so it is **opt-in, off
 by default, and gated**. The default posture never weakens.
 
-## Mail journal (proposed)
+## Mail journal
+
+The mail journal is a **built-in, opt-in capability** (part of v0.1). Every
+deployment can switch it on to gain auditability, reconciliation, and
+idempotency. It is an **activation seam** — a toggle on the engine, not a
+separate service — and it is **off by default**. There is no shared journal;
+each operator runs and owns their own.
 
 A lightweight, append-only record of what the engine did. Per message it stores
 a **reference** (an account-neutral source key / message-id hash), the **action**
@@ -146,7 +152,8 @@ reader (IMAP) → quarantine (LLM adapter) → gate (deterministic) → actions
 
 **In:** read-only IMAP fetch → quarantined classification + draft → automatic
 labeling (reversible) → stage draft (native Drafts, or `Nucleon/Outbox`
-fallback) → read-only reconciliation via Sent. Local models supported.
+fallback) → read-only reconciliation via Sent. Includes the opt-in **mail
+journal** (metadata/hashes only, off by default). Local models supported.
 
 **Out, by design (seams left for later):** SMTP/sending, deletion, a web UI,
 non-Proton providers.
