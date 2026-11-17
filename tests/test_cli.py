@@ -39,7 +39,8 @@ def test_run_subcommand_invokes_engine(tmp_path, capsys):
                   deps=lambda cfg: (store, clf, NullJournal()))
     assert rc == 0
     assert len(store.appended_drafts) == 1
-    assert "processed=1" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "processed=1" in out and "errors=0" in out
 
 
 def test_reconcile_subcommand_invokes_reconcile(tmp_path, capsys):

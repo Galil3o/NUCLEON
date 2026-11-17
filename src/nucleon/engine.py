@@ -21,48 +21,65 @@ class RunReport:
     labeled: int = 0
     drafted: int = 0
     trashed: int = 0
+    errors: int = 0
 
 
 def run_once(
     store: MailStore, classifier: Classifier, journal: Journal, cfg: Config
 ) -> RunReport:
-    processed = skipped = labeled = drafted = trashed = 0
+    processed = skipped = labeled = drafted = trashed = errors = 0
     refs = store.list_window(cfg.mail.mailbox, cfg.mail.since_days, cfg.mail.limit)
     for ref in refs:
         if journal.has_processed(ref.key()):
             skipped += 1
             continue
-        meta = store.fetch_meta(ref)
-        body = store.fetch_body_text(ref)
-        classification = classifier.classify(meta, body)
-        acts = gate.decide(classification, meta, cfg)
-        did_draft = did_trash = False
-        for a in acts:
-            actions_mod.execute(a, store)
-            if isinstance(a, ApplyLabel):
-                labeled += 1
-            elif isinstance(a, StageDraft):
-                did_draft = True
-                drafted += 1
-            elif isinstance(a, DeleteToTrash):
-                did_trash = True
-                trashed += 1
-        action = "drafted" if did_draft else "trashed" if did_trash else "classified"
-        journal.record(
-            JournalEntry(
-                ref_key=ref.key(),
-                account_hash=ref.account_hash,
-                mailbox=ref.mailbox,
-                uid=ref.uid,
-                message_id_hash=ref.message_id_hash,
-                raw_hash=ref.raw_hash,
-                action=action,
-                status="ok",
-                ts=datetime.now(timezone.utc),
-            )
-        )
+        # Conservative policy: errors are surfaced, not auto-retried. A failing
+        # message is journaled with status="error" (marking it processed, so a
+        # retry cannot re-stage a duplicate draft) and the pass moves on. The
+        # operator sees it via the journal and RunReport.errors. The exception
+        # text is deliberately NOT recorded (it may carry untrusted content).
+        try:
+            meta = store.fetch_meta(ref)
+            body = store.fetch_body_text(ref)
+            classification = classifier.classify(meta, body)
+            acts = gate.decide(classification, meta, cfg)
+            did_draft = did_trash = False
+            n_labeled = 0
+            for a in acts:
+                actions_mod.execute(a, store)
+                if isinstance(a, ApplyLabel):
+                    n_labeled += 1
+                elif isinstance(a, StageDraft):
+                    did_draft = True
+                elif isinstance(a, DeleteToTrash):
+                    did_trash = True
+            action = "drafted" if did_draft else "trashed" if did_trash else "classified"
+            _record(journal, ref, action, "ok")
+        except Exception:
+            _record(journal, ref, "classified", "error")
+            errors += 1
+            continue
+        labeled += n_labeled
+        drafted += did_draft
+        trashed += did_trash
         processed += 1
-    return RunReport(processed, skipped, labeled, drafted, trashed)
+    return RunReport(processed, skipped, labeled, drafted, trashed, errors)
+
+
+def _record(journal: Journal, ref, action: str, status: str) -> None:
+    journal.record(
+        JournalEntry(
+            ref_key=ref.key(),
+            account_hash=ref.account_hash,
+            mailbox=ref.mailbox,
+            uid=ref.uid,
+            message_id_hash=ref.message_id_hash,
+            raw_hash=ref.raw_hash,
+            action=action,
+            status=status,
+            ts=datetime.now(timezone.utc),
+        )
+    )
 
 
 def reconcile(store: MailStore, journal: Journal, cfg: Config) -> int:
