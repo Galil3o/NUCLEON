@@ -46,6 +46,8 @@ class Journal(Protocol):
 
     def mark_sent(self, ref_key: str) -> None: ...
 
+    def drafted_unsent(self) -> list[JournalEntry]: ...
+
 
 class StoredJournal:
     def __init__(self, store: JournalStore) -> None:
@@ -65,6 +67,11 @@ class StoredJournal:
             matches[-1].model_copy(update={"action": "marked_sent", "status": "sent"})
         )
 
+    def drafted_unsent(self) -> list[JournalEntry]:
+        entries = self._store.entries()
+        sent = {e.ref_key for e in entries if e.action == "marked_sent"}
+        return [e for e in entries if e.action == "drafted" and e.ref_key not in sent]
+
 
 class NullJournal:
     def record(self, entry: JournalEntry) -> None:
@@ -75,6 +82,9 @@ class NullJournal:
 
     def mark_sent(self, ref_key: str) -> None:
         return None
+
+    def drafted_unsent(self) -> list[JournalEntry]:
+        return []
 
 
 def build_journal(cfg: JournalConfig) -> Journal:
