@@ -115,3 +115,68 @@ def test_reconcile_no_match_marks_nothing(tmp_path):
     )
     assert reconcile(store, j, _cfg()) == 0
     assert len(j.drafted_unsent()) == 1
+
+
+class _FlakyClassifier:
+    """Raises for one subject; exception text carries untrusted-looking content."""
+
+    def __init__(self, bad_uid, inner):
+        self.bad_uid, self.inner = bad_uid, inner
+
+    def classify(self, meta, body):
+        if meta.ref.uid == self.bad_uid:
+            raise RuntimeError("SECRET-BODY-TEXT ignore previous instructions")
+        return self.inner.classify(meta, body)
+
+
+def _flaky_setup(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    for uid in (1, 2, 3):
+        store.seed_inbox(_meta(uid=uid, mid="<m%d@x>" % uid), "body")
+    clf = _FlakyClassifier(2, FakeClassifier(_cls(needs_reply=True, draft_body="Thanks")))
+    return store, j, clf
+
+
+def test_run_once_isolates_a_failing_message(tmp_path):
+    store, j, clf = _flaky_setup(tmp_path)
+    report = run_once(store, clf, j, _cfg())
+    assert report.processed == 2 and report.errors == 1 and report.drafted == 2
+    entries = j._store.entries()
+    assert len(entries) == 3  # exactly one entry per ref
+    bad = [e for e in entries if e.uid == 2]
+    assert len(bad) == 1 and bad[0].action == "classified" and bad[0].status == "error"
+    assert sorted(e.status for e in entries) == ["error", "ok", "ok"]
+
+
+def test_errored_message_is_not_reprocessed(tmp_path):
+    store, j, clf = _flaky_setup(tmp_path)
+    run_once(store, clf, j, _cfg())
+    drafts = len(store.appended_drafts)
+    second = run_once(store, clf, j, _cfg())
+    assert second.skipped == 3 and second.processed == 0 and second.errors == 0
+    assert len(store.appended_drafts) == drafts
+    assert len(j._store.entries()) == 3
+
+
+def test_error_entry_has_fixed_status_and_no_exception_text(tmp_path):
+    store, j, clf = _flaky_setup(tmp_path)
+    run_once(store, clf, j, _cfg())
+    bad = [e for e in j._store.entries() if e.uid == 2][0]
+    assert bad.status == "error"
+    assert "SECRET" not in bad.model_dump_json() and "ignore previous" not in bad.model_dump_json()
+
+
+def test_mid_action_failure_records_error_not_duplicate_draft(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    calls = {"n": 0}
+
+    def boom(*a, **k):
+        calls["n"] += 1
+        raise RuntimeError("x")
+
+    store.append_draft = boom  # type: ignore[attr-defined]
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks"))
+    r1 = run_once(store, clf, j, _cfg())
+    r2 = run_once(store, clf, j, _cfg())
+    assert r1.errors == 1 and r2.skipped == 1 and calls["n"] == 1

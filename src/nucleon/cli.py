@@ -72,7 +72,7 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
         if args.command == "run":
             r = run_once(store, classifier, journal, cfg)
             print(f"processed={r.processed} skipped={r.skipped} labeled={r.labeled} "
-                  f"drafted={r.drafted} trashed={r.trashed}")
+                  f"drafted={r.drafted} trashed={r.trashed} errors={r.errors}")
         else:
             print(f"reconciled={reconcile(store, journal, cfg)}")
     except Exception as exc:  # handled error: short message, no traceback
