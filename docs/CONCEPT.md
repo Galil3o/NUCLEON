@@ -45,13 +45,13 @@ not the model, authorizes actions.
 
 ## The gate: reversible vs. irreversible
 
-- **Reversible actions** — label, move/file, archive. Run **automatically**,
-  deterministically, and are undoable.
-- **Irreversible actions** — send, delete. **Never** performed autonomously by
-  Nucleon.
+- **Reversible actions** — label, move/file, archive, and **move to Trash**.
+  Deterministic and undoable. Moving to Trash is recoverable, so it is allowed
+  as cleanup — but **opt-in and policy-gated**, off by default, so a
+  classification mistake cannot silently remove mail.
+- **Irreversible actions** — **never** performed by Nucleon.
   - **Send** is delegated to the human (see "Drafts-only approval").
-  - **Delete** means *trash* (reversible), never a permanent expunge, and is
-    gated.
+  - **Permanent deletion** (expunge, emptying Trash) is never performed at all.
 
 ## Drafts-only approval (v0.1)
 
@@ -114,6 +114,11 @@ a **reference** (an account-neutral source key / message-id hash), the **action*
 - **Boundary:** the engine defines only the **schema**. The actual journal data
   for a deployment lives in the operator's private space, never in this
   repository.
+- **Storage:** the operator chooses **where** the journal is written through a
+  pluggable backend. v0.1 ships a local-file backend with an operator-defined
+  path; because entries are metadata/hashes only, remote backends (a private Git
+  repository, a cloud drive) are acceptable and can be added behind the same
+  interface.
 
 ## Architecture
 
@@ -152,11 +157,12 @@ reader (IMAP) → quarantine (LLM adapter) → gate (deterministic) → actions
 
 **In:** read-only IMAP fetch → quarantined classification + draft → automatic
 labeling (reversible) → stage draft (native Drafts, or `Nucleon/Outbox`
-fallback) → read-only reconciliation via Sent. Includes the opt-in **mail
-journal** (metadata/hashes only, off by default). Local models supported.
+fallback) → optional **move-to-Trash cleanup** (reversible, opt-in) → read-only
+reconciliation via Sent. Includes the opt-in **mail journal** (metadata/hashes
+only, off by default). Local models supported.
 
-**Out, by design (seams left for later):** SMTP/sending, deletion, a web UI,
-non-Proton providers.
+**Out, by design (seams left for later):** SMTP/sending, **permanent** deletion
+(expunge, emptying Trash), a web UI, non-Proton providers.
 
 ## Contributing
 
