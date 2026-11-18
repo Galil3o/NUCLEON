@@ -229,7 +229,20 @@ class Config(BaseModel):
     registry_path: str = "nucleon-state/accounts.json"
 
 
+class ConfigError(ValueError):
+    """The config file cannot be parsed (reported with exit status 2)."""
+
+
 def load_config(path: str) -> Config:
     with open(path, encoding="utf-8") as fh:
-        data = yaml.safe_load(fh)
+        try:
+            data = yaml.safe_load(fh)
+        except yaml.YAMLError as exc:
+            # R-015: a YAML syntax error is a config error, not a traceback.
+            # Keep only the parser's short problem text and the position; never
+            # the surrounding file content.
+            mark = getattr(exc, "problem_mark", None)
+            problem = str(getattr(exc, "problem", None) or "invalid YAML")[:100]
+            where = f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
+            raise ConfigError(f"YAML syntax error{where}: {problem}") from None
     return Config.model_validate(data)

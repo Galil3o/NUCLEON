@@ -173,3 +173,22 @@ def test_r014_over_budget_is_a_failed_run(tmp_path, capsys):
 def test_r014_clean_run_and_vanished_only_are_exit_zero(tmp_path):
     assert cli.main(["run", "--config", _config(tmp_path)],
                     deps=lambda cfg: (_seeded_store(), _ok_clf(), NullJournal())) == 0
+
+
+# -- R-015: YAML parser errors are config errors (exit 2) ---------------------
+
+@pytest.mark.parametrize("bad", [
+    "mail: {mode: imap\nhost: [unclosed\n",
+    "a: b: c\n",
+    "\tkey: tab-indented\n",
+    "key: 'SECRET-VALUE-XYZ\n",
+])
+def test_r015_broken_yaml_is_config_error_exit_2(tmp_path, capsys, bad):
+    p = tmp_path / "config.yaml"
+    p.write_text(bad, encoding="utf-8")
+    rc = cli.main(["run", "--config", str(p)],
+                  deps=lambda cfg: pytest.fail("deps must not be called"))
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err and "line" in err and "column" in err
+    assert "SECRET-VALUE-XYZ" not in err and len(err) < 400  # no raw dump
