@@ -52,3 +52,23 @@ def test_list_sent_returns_seeded():
     m = _meta(1, "Sent")
     s.seed_sent(m)
     assert s.list_sent(30, 10) == [m]
+
+
+def test_uidvalidity_change_makes_every_ref_access_stale():
+    import pytest
+
+    from nucleon.mailstore import StaleReferenceError
+
+    s = FakeMailStore()
+    m = _meta(1)
+    s.seed_inbox(m, "body")
+    s.set_uidvalidity("INBOX", 5)
+    for call in (
+        lambda: s.fetch_meta(m.ref),
+        lambda: s.fetch_body_text(m.ref),
+        lambda: s.set_label(m.ref, "nucleon/x"),
+        lambda: s.move_to_trash(m.ref),
+    ):
+        with pytest.raises(StaleReferenceError):
+            call()
+    assert s.labels == [] and s.moved_to_trash == []

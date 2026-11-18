@@ -191,3 +191,33 @@ def test_r001_engine_drops_labels_on_provider_system_folders(tmp_path):
     clf = FakeClassifier(_cls(labels=["Labels/Hidden", "nucleon/ok", "Trash"]))
     run_once(store, clf, j, cfg)
     assert [l for _, l in store.labels] == ["nucleon/ok"]
+
+
+def test_r002_changed_uidvalidity_is_vanished_not_acted_on(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    refs = store.list_window("INBOX", 7, 10)
+    store.set_uidvalidity("INBOX", 2)  # server renumbered the folder after listing
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks", category="newsletter"))
+    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    report = run_once(store, clf, j, cfg)
+    assert refs and report.vanished == 1 and report.errors == 0 and report.processed == 0
+    assert store.appended_drafts == [] and store.labels == [] and store.moved_to_trash == []
+    assert j._store.entries() == []  # stale ref is not recorded as processed
+
+
+def test_r002_stale_ref_during_actions_stops_further_actions(tmp_path):
+    """UIDVALIDITY flips between fetch and the label/trash step: no UID-based write."""
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    real_fetch = store.fetch_body_text
+
+    def flip(ref):
+        text = real_fetch(ref)
+        store.set_uidvalidity("INBOX", 9)
+        return text
+
+    store.fetch_body_text = flip  # type: ignore[method-assign]
+    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    report = run_once(store, FakeClassifier(_cls(category="newsletter")), j, cfg)
+    assert report.vanished == 1 and store.labels == [] and store.moved_to_trash == []

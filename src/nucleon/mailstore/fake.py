@@ -1,6 +1,7 @@
 """In-memory MailStore for tests."""
 from __future__ import annotations
 
+from nucleon.mailstore import StaleReferenceError
 from nucleon.models import MessageMeta, MessageRef
 
 
@@ -14,9 +15,18 @@ class FakeMailStore:
         self.moved_to_trash: list[MessageRef] = []
         self.seen: set[str] = set()
         self.system_folder_names: frozenset[str] = frozenset()
+        self._validity: dict[str, int] = {}
 
     def system_folders(self) -> frozenset[str]:
         return self.system_folder_names
+
+    def set_uidvalidity(self, mailbox: str, value: int) -> None:
+        """Simulate the server renumbering a folder (UIDs no longer comparable)."""
+        self._validity[mailbox] = value
+
+    def _check(self, ref: MessageRef) -> None:
+        if self._validity.get(ref.mailbox, 1) != ref.uidvalidity:
+            raise StaleReferenceError(ref.mailbox)
 
     def seed_inbox(self, meta: MessageMeta, body: str) -> None:
         self._inbox.append(meta)
@@ -30,12 +40,14 @@ class FakeMailStore:
         return refs[:limit]
 
     def fetch_meta(self, ref: MessageRef) -> MessageMeta:
+        self._check(ref)
         for m in self._inbox + self._sent:
             if m.ref.key() == ref.key():
                 return m
         raise KeyError(ref.key())
 
     def fetch_body_text(self, ref: MessageRef) -> str:
+        self._check(ref)
         # Deliberately does not touch self.seen (models BODY.PEEK).
         return self._bodies[ref.key()]
 
@@ -49,7 +61,9 @@ class FakeMailStore:
         )
 
     def set_label(self, ref: MessageRef, label: str) -> None:
+        self._check(ref)
         self.labels.append((ref, label))
 
     def move_to_trash(self, ref: MessageRef) -> None:
+        self._check(ref)
         self.moved_to_trash.append(ref)
