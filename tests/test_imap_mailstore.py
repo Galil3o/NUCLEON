@@ -186,3 +186,53 @@ def test_set_label_fails_closed_when_list_fails(store, conn):
     with pytest.raises(RuntimeError):
         store.set_label(ref, "Labels/Work")
     assert not any(c[:2] == ("UID", "COPY") for c in conn.cmds)
+
+
+# -- R-002: UIDVALIDITY is verified before every ref-based access -------------
+class ChangedValidityConn(FakeConn):
+    def response(self, code):
+        return code, [b"99"]  # server now reports a different UIDVALIDITY
+
+
+def _stale(store):
+    ref = _ref(store)  # uidvalidity 77
+    store._conn = ChangedValidityConn()
+    store._conn.cmds = []
+    return ref, store._conn
+
+
+@pytest.mark.parametrize("op", ["fetch_meta", "fetch_body_text", "move_to_trash", "label"])
+def test_changed_uidvalidity_aborts_without_touching_uid(store, op):
+    from nucleon.mailstore import StaleReferenceError
+
+    ref, c = _stale(store)
+    call = {
+        "fetch_meta": lambda: store.fetch_meta(ref),
+        "fetch_body_text": lambda: store.fetch_body_text(ref),
+        "move_to_trash": lambda: store.move_to_trash(ref),
+        "label": lambda: store.set_label(ref, "Labels/Work"),
+    }[op]
+    with pytest.raises(StaleReferenceError):
+        call()
+    assert ("SELECT", "INBOX") in c.cmds  # re-selected before the check
+    assert not any(x[0] == "UID" for x in c.cmds)
+
+
+def test_unknown_uidvalidity_aborts(store):
+    from nucleon.mailstore import StaleReferenceError
+
+    ref = _ref(store)
+
+    class NoValidity(FakeConn):
+        def response(self, code):
+            return code, [None]
+
+    store._conn = NoValidity()
+    with pytest.raises(StaleReferenceError):
+        store.fetch_meta(ref)
+
+
+def test_matching_uidvalidity_still_works(store, conn):
+    ref = _ref(store)
+    store.move_to_trash(ref)
+    assert ("UID", "MOVE", str(ref.uid), "Trash") in conn.cmds

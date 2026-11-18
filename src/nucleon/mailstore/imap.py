@@ -14,6 +14,7 @@ from email.policy import default as _policy
 from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any, Optional
 
+from nucleon.mailstore import StaleReferenceError
 from nucleon.models import MessageMeta, MessageRef
 
 # LIST attributes (RFC 3501 / RFC 6154 SPECIAL-USE) that mark a folder as
@@ -79,6 +80,12 @@ class ImapMailStore:
                     names.add(name)
             self._system = frozenset(names)
         return self._system
+
+    def _select_checked(self, ref: MessageRef) -> None:
+        """(Re-)SELECT and verify UIDVALIDITY before any UID-based access (R-002)."""
+        validity = self._select(ref.mailbox)
+        if validity == 0 or validity != ref.uidvalidity:
+            raise StaleReferenceError(ref.mailbox)
 
     def _select(self, mailbox: str) -> int:
         _check(self._conn.select(mailbox), f"SELECT {mailbox}")
@@ -147,11 +154,11 @@ class ImapMailStore:
         ]
 
     def fetch_meta(self, ref: MessageRef) -> MessageMeta:
-        self._select(ref.mailbox)
+        self._select_checked(ref)
         return self._meta_from(ref, self._header_bytes(ref.uid))
 
     def fetch_body_text(self, ref: MessageRef) -> str:
-        self._select(ref.mailbox)
+        self._select_checked(ref)
         msg = message_from_bytes(self._fetch(ref.uid, "(BODY.PEEK[])"), policy=_policy)
         part = msg.get_body(preferencelist=("plain", "html"))
         if part is None:
@@ -191,10 +198,10 @@ class ImapMailStore:
         """
         if label.casefold() in {n.casefold() for n in self.system_folders()}:
             raise ValueError("label resolves to a system/special folder")
-        self._select(ref.mailbox)
+        self._select_checked(ref)
         _check(self._conn.uid("COPY", str(ref.uid), label), "COPY")
 
     def move_to_trash(self, ref: MessageRef) -> None:
         """Targeted, reversible UID MOVE (RFC 6851) to Trash; never expunges/purges."""
-        self._select(ref.mailbox)
+        self._select_checked(ref)
         _check(self._conn.uid("MOVE", str(ref.uid), self._trash), "MOVE")

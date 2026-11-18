@@ -9,7 +9,7 @@ from nucleon import actions as actions_mod
 from nucleon import gate
 from nucleon.config import Config
 from nucleon.journal import Journal
-from nucleon.mailstore import MailStore
+from nucleon.mailstore import MailStore, StaleReferenceError
 from nucleon.models import ApplyLabel, DeleteToTrash, JournalEntry, StageDraft
 from nucleon.quarantine import Classifier
 
@@ -22,12 +22,13 @@ class RunReport:
     drafted: int = 0
     trashed: int = 0
     errors: int = 0
+    vanished: int = 0
 
 
 def run_once(
     store: MailStore, classifier: Classifier, journal: Journal, cfg: Config
 ) -> RunReport:
-    processed = skipped = labeled = drafted = trashed = errors = 0
+    processed = skipped = labeled = drafted = trashed = errors = vanished = 0
     refs = store.list_window(cfg.mail.mailbox, cfg.mail.since_days, cfg.mail.limit)
     for ref in refs:
         if journal.has_processed(ref.key()):
@@ -55,6 +56,11 @@ def run_once(
                     did_trash = True
             action = "drafted" if did_draft else "trashed" if did_trash else "classified"
             _record(journal, ref, action, "ok")
+        except StaleReferenceError:
+            # R-002: UIDVALIDITY changed; the UID may now be a different
+            # message. Treat as vanished: no further action, nothing recorded.
+            vanished += 1
+            continue
         except Exception:
             _record(journal, ref, "classified", "error")
             errors += 1
@@ -63,7 +69,7 @@ def run_once(
         drafted += did_draft
         trashed += did_trash
         processed += 1
-    return RunReport(processed, skipped, labeled, drafted, trashed, errors)
+    return RunReport(processed, skipped, labeled, drafted, trashed, errors, vanished)
 
 
 def _record(journal: Journal, ref, action: str, status: str) -> None:
