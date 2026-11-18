@@ -17,6 +17,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from nucleon.appendlog import append_line
 from nucleon.config import MarkerConfig
 from nucleon.models import DraftRef
 
@@ -50,13 +51,7 @@ class FileMarkerStore:
         self._path = path
 
     def append(self, entry: MarkerEntry) -> None:
-        parent = os.path.dirname(self._path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(self._path, "a", encoding="utf-8") as f:
-            f.write(entry.model_dump_json(exclude_none=True) + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        append_line(self._path, entry.model_dump_json(exclude_none=True))  # R-013
 
     def entries(self) -> list[MarkerEntry]:
         if not os.path.exists(self._path):

@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from nucleon.addresses import normalize_address
+from nucleon.appendlog import append_line
 from nucleon.models import MessageMeta, RecipientLine
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -47,13 +48,7 @@ class FileLearnedStore:
         self._path = path
 
     def append(self, entry: LearnedEntry) -> None:
-        parent = os.path.dirname(self._path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(self._path, "a", encoding="utf-8") as f:
-            f.write(entry.model_dump_json() + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        append_line(self._path, entry.model_dump_json())  # R-013
 
     def entries(self) -> list[LearnedEntry]:
         if not os.path.exists(self._path):
