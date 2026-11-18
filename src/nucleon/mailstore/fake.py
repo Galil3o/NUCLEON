@@ -1,6 +1,8 @@
 """In-memory MailStore for tests."""
 from __future__ import annotations
 
+from typing import Iterator
+
 from nucleon.mailstore import StaleReferenceError
 from nucleon.models import MessageMeta, MessageRef
 
@@ -38,6 +40,9 @@ class FakeMailStore:
     def list_window(self, mailbox: str, since_days: int, limit: int) -> list[MessageRef]:
         refs = [m.ref for m in self._inbox if m.ref.mailbox == mailbox]
         return refs[:limit]
+
+    def iter_window(self, mailbox: str, since_days: int) -> Iterator[MessageRef]:
+        yield from (m.ref for m in self._inbox if m.ref.mailbox == mailbox)
 
     def fetch_meta(self, ref: MessageRef) -> MessageMeta:
         self._check(ref)
