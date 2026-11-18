@@ -226,3 +226,28 @@ From the independent review. All findings accepted; built into the v0.2 run.
 - A non-sendable **label** on the draft is a quiet backstop (useful once a GUI
   exists). Residual leak risk (operator forgets to delete the block) is inherent
   to a CLI + web-client workflow; the loud wrapper minimizes it.
+
+## `[2026-11-18]` Scope: kritische Punkte / Fristen aus Mails erfassen (nativ) — Owner-Entscheidung
+Mail-Automation umfasst **ausdrücklich** das Erkennen, Erfassen und Tracken
+**kritischer Punkte** in Nachrichten — nicht nur Labeln/Antworten. Die enge
+Lesart („nur Label + Draft") wird hiermit erweitert.
+
+- **In Scope:** benennt eine Mail eine **konkrete Frist / einen Termin**, kann
+  diese erfasst und weiterverarbeitet werden — Überführung in einen **Kalender**
+  (ICS/CalDAV bzw. Provider-Kalender) und optional ein **Reminder** (z. B.
+  „fällig in den nächsten 7 Tagen" / tägliche Fälligkeits-Übersicht).
+- **Gate-Disziplin:** Extraktion durch den quarantänisierten Classifier als
+  **typisiertes, validiertes Feld** — kein Freitext-Trigger; die Kalender-/
+  Reminder-Aktion läuft über denselben deterministischen Gate wie jede Aktion
+  (Kalendereintrag = reversibel; etwaiger Versand von Erinnerungen =
+  approval-gated).
+- **Pro Konto zu-/abschaltbar** (Default aus in v0.1). Der genaue
+  Reminder-Mechanismus ist Detail — **wesentlich ist, dass dieser Bereich
+  existiert.**
+- **Abgrenzung:** kein Fristen-/Rechtsmanagement, keine Fristberechnung — reines
+  Automations-Tracking kritischer Punkte.
+- **Einordnung:** nicht v0.1 (dort Label + Draft). Ab **v0.2/Roadmap** als eigene
+  Capability hinter dem Provider-/Gate-Seam.
+
+_Herkunft: projektneutrale Idee „PROCESS_GUARDIAN" aus dem Nachbarprojekt; Nucleon
+übernimmt nur die Idee, projektspezifisch formuliert, ohne Datenvermischung._
