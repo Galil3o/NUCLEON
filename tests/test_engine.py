@@ -301,3 +301,40 @@ def test_r003_errored_message_is_marked_and_not_retried(tmp_path):
     n = len(store.appended_drafts)
     r = run_once(store, clf, NullJournal(), _cfg(), _marker(tmp_path))
     assert r.skipped == 3 and len(store.appended_drafts) == n
+
+
+def _limited_cfg(limit):
+    cfg = _cfg()
+    return cfg.model_copy(update={"mail": cfg.mail.model_copy(update={"limit": limit})})
+
+
+def test_r005_limit_applies_after_marker_filter_oldest_not_starved(tmp_path):
+    """3 messages, limit 2: across runs the oldest is reached; none is skipped forever."""
+    store = FakeMailStore()
+    for uid in (1, 2, 3):  # uid 1 is the oldest
+        store.seed_inbox(_meta(uid=uid, mid="<m%d@x>" % uid), "body")
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks"))
+    cfg = _limited_cfg(2)
+    reports = []
+    for _ in range(3):
+        reports.append(run_once(store, clf, NullJournal(), cfg, _marker(tmp_path)))
+    assert [r.processed for r in reports] == [2, 1, 0]
+    assert len(store.appended_drafts) == 3  # every message handled exactly once
+    assert {r.uid for r, _ in store.labels if r.uid in (1, 2, 3)} == {1, 2, 3}
+
+
+def test_r005_already_processed_do_not_consume_the_limit(tmp_path):
+    store = FakeMailStore()
+    for uid in (1, 2, 3, 4):
+        store.seed_inbox(_meta(uid=uid, mid="<m%d@x>" % uid), "body")
+    clf = FakeClassifier(_cls())
+    r1 = run_once(store, clf, NullJournal(), _limited_cfg(2), _marker(tmp_path))
+    r2 = run_once(store, clf, NullJournal(), _limited_cfg(2), _marker(tmp_path))
+    assert r1.processed == 2 and r2.processed == 2 and r2.skipped == 2
+
+
+def test_r005_limit_zero_processes_nothing(tmp_path):
+    store = FakeMailStore()
+    store.seed_inbox(_meta(), "body")
+    r = run_once(store, FakeClassifier(_cls()), NullJournal(), _limited_cfg(0), _marker(tmp_path))
+    assert r.processed == 0 and store.labels == []

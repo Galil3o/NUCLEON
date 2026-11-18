@@ -38,12 +38,19 @@ def run_once(
     if marker is None:
         raise ValueError("run_once requires a processing marker")
     processed = skipped = labeled = drafted = trashed = errors = vanished = 0
-    refs = store.list_window(cfg.mail.mailbox, cfg.mail.since_days, cfg.mail.limit)
-    for ref in refs:
+    # R-005: the limit bounds the WORK left after the marker/journal filter,
+    # not the window, so older unprocessed mail cannot starve behind newer
+    # mail. Oldest-first iteration makes progress strictly monotonic.
+    limit = cfg.mail.limit
+    attempted = 0
+    for ref in store.iter_window(cfg.mail.mailbox, cfg.mail.since_days):
         pkey = ref.processing_key()
         if marker.is_done(pkey) or journal.has_processed(ref.key()):
             skipped += 1
             continue
+        if attempted >= limit:
+            break
+        attempted += 1
         # Conservative policy: errors are surfaced, not auto-retried. A failing
         # message is journaled with status="error" (marking it processed, so a
         # retry cannot re-stage a duplicate draft) and the pass moves on. The

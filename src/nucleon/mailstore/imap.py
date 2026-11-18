@@ -12,7 +12,7 @@ from email import message_from_bytes
 from email.message import Message
 from email.policy import default as _policy
 from email.utils import getaddresses, parsedate_to_datetime
-from typing import Any, Optional
+from typing import Any, Iterator, Optional
 
 from nucleon.mailstore import StaleReferenceError
 from nucleon.models import MessageMeta, MessageRef
@@ -95,11 +95,15 @@ class ImapMailStore:
         except (TypeError, ValueError, IndexError):
             return 0
 
-    def _search(self, since_days: int, limit: int) -> list[int]:
+    def _search_all(self, since_days: int) -> list[int]:
+        """All matching UIDs, ascending (stable order); no windowing."""
         data = _check(
             self._conn.uid("SEARCH", None, "SINCE", _imap_date(since_days)), "SEARCH"
         )
-        uids = [int(u) for u in (data[0] or b"").split()]
+        return sorted(int(u) for u in (data[0] or b"").split())
+
+    def _search(self, since_days: int, limit: int) -> list[int]:
+        uids = self._search_all(since_days)
         return uids[-limit:] if limit > 0 else []
 
     def _fetch(self, uid: int, item: str) -> bytes:
@@ -152,6 +156,20 @@ class ImapMailStore:
             self._build_ref(mailbox, validity, uid, self._header_bytes(uid))
             for uid in self._search(since_days, limit)
         ]
+
+    def iter_window(self, mailbox: str, since_days: int) -> Iterator[MessageRef]:
+        """R-005: every UID in the window, oldest first, headers fetched lazily.
+
+        The caller (engine) applies its processing limit AFTER its marker /
+        journal filter, so older unprocessed mail is never starved by newer
+        mail. UIDVALIDITY is re-verified before each header fetch; if it
+        changes mid-iteration the iteration ends (nothing is guessed).
+        """
+        validity = self._select(mailbox)
+        for uid in self._search_all(since_days):
+            if self._select(mailbox) != validity:
+                return
+            yield self._build_ref(mailbox, validity, uid, self._header_bytes(uid))
 
     def fetch_meta(self, ref: MessageRef) -> MessageMeta:
         self._select_checked(ref)

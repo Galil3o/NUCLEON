@@ -236,3 +236,24 @@ def test_matching_uidvalidity_still_works(store, conn):
     ref = _ref(store)
     store.move_to_trash(ref)
     assert ("UID", "MOVE", str(ref.uid), "Trash") in conn.cmds
+
+
+# -- R-005: stable paging; the limit is NOT applied inside the adapter --------
+def test_iter_window_is_oldest_first_and_unlimited(store):
+    assert [r.uid for r in store.iter_window("INBOX", 7)] == [5, 6, 7]
+
+
+def test_iter_window_fetches_headers_lazily(store, conn):
+    it = store.iter_window("INBOX", 7)
+    conn.cmds.clear()
+    first = next(it)
+    assert first.uid == 5
+    fetched = [c[2] for c in conn.cmds if c[:2] == ("UID", "FETCH")]
+    assert fetched == ["5"]  # later UIDs untouched until the engine asks for them
+
+
+def test_iter_window_stops_if_uidvalidity_changes_midway(store, conn):
+    it = store.iter_window("INBOX", 7)
+    assert next(it).uid == 5
+    store._conn = ChangedValidityConn()
+    assert list(it) == []

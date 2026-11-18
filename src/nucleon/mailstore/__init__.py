@@ -1,7 +1,7 @@
 """MailStore interface. Read-only except draft/label/trash; there is no send method."""
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Iterator, Protocol
 
 from nucleon.models import MessageMeta, MessageRef
 
@@ -20,6 +20,11 @@ class MailStore(Protocol):
         ...
 
     def list_window(self, mailbox: str, since_days: int, limit: int) -> list[MessageRef]: ...
+
+    def iter_window(self, mailbox: str, since_days: int) -> Iterator[MessageRef]:
+        """All refs in the window, oldest first, unlimited (R-005): the caller
+        applies its processing limit after its own marker/journal filter."""
+        ...
 
     def fetch_meta(self, ref: MessageRef) -> MessageMeta: ...
 
