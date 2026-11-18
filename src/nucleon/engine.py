@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import hashlib
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from typing import Literal
 
 from nucleon import actions as actions_mod
+from nucleon.analysis import AnalysisLog
 from nucleon.actions import draft_message_id
 from nucleon import gate
 from nucleon.config import Config
@@ -35,6 +37,7 @@ def run_once(
     journal: Journal,
     cfg: Config,
     marker: ProcessingMarker,
+    analysis: AnalysisLog | None = None,
 ) -> RunReport:
     # R-003: a write run without an effective marker would duplicate drafts on
     # every repeat, so it is refused outright (the audit journal is optional).
@@ -54,6 +57,9 @@ def run_once(
         if attempted >= limit:
             break
         attempted += 1
+        stage = "fetch"
+        t0 = time.monotonic()
+        steps: list[str] = []
         # Conservative policy: errors are surfaced, not auto-retried. A failing
         # message is journaled with status="error" (marking it processed, so a
         # retry cannot re-stage a duplicate draft) and the pass moves on. The
@@ -62,11 +68,13 @@ def run_once(
         try:
             meta = store.fetch_meta(ref)
             body = store.fetch_body_text(ref)
+            stage = "classify"
             classification = classifier.classify(meta, body)
+            stage = "gate"
             acts = gate.decide(classification, meta, cfg, store.system_folders())
+            stage = "act"
             did_draft = did_trash = False
             n_labeled = 0
-            steps: list[str] = []
             draft: list[DraftRef] = []  # latest stable draft reference (R-004)
             if acts:
                 # Durable BEFORE the first mailbox write: a crash mid-action
@@ -106,11 +114,12 @@ def run_once(
             # message. Treat as vanished: no further action, nothing recorded.
             vanished += 1
             continue
-        except Exception:
+        except Exception as exc:
             # Completed sub-steps and the draft reference stay in the marker
             # (R-004); only the status changes. No automatic retry.
             marker.mark(pkey, "error", tuple(steps))
             _record(journal, ref, "classified", "error")
+            _stage2(analysis, cfg, stage, exc, t0, ref, steps)
             errors += 1
             continue
         labeled += n_labeled
@@ -118,6 +127,19 @@ def run_once(
         trashed += did_trash
         processed += 1
     return RunReport(processed, skipped, labeled, drafted, trashed, errors, vanished)
+
+
+def _stage2(analysis, cfg, stage, exc, t0, ref, steps) -> None:
+    """Stage 2 (R-008): fixed metadata record only. Never raises into the run."""
+    if analysis is None or not cfg.analysis.enabled:
+        return
+    try:
+        analysis.record_stage2(
+            failed_stage=stage, exc=exc, duration_ms=int((time.monotonic() - t0) * 1000),
+            ref_key=ref.processing_key(), account_hash=ref.account_hash, steps=tuple(steps),
+        )
+    except Exception:
+        pass  # diagnostics must never break (or leak through) the pass
 
 
 def _add(steps: list[str], step: str) -> bool:

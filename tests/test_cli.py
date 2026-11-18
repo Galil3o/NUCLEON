@@ -93,3 +93,19 @@ def test_run_twice_with_null_journal_creates_no_duplicate_draft(tmp_path, capsys
                         deps=lambda cfg: (store, clf, NullJournal())) == 0
     assert len(store.appended_drafts) == 1
     assert "skipped=1" in capsys.readouterr().out
+
+
+def test_r008_cli_wires_stage2_only_when_analysis_enabled(tmp_path):
+    class Boom:
+        def classify(self, meta, body):
+            raise ValueError("Subject: secret alice@example.com")
+
+    p = tmp_path / "config.yaml"
+    apath = tmp_path / "analysis.jsonl"
+    p.write_text(CONFIG + f"marker: {{path: {tmp_path / 'm.jsonl'}}}\n"
+                 f"analysis: {{enabled: true, path: {apath}}}\n", encoding="utf-8")
+    rc = cli.main(["run", "--config", str(p)],
+                  deps=lambda cfg: (_seeded_store(), Boom(), NullJournal()))
+    assert rc == 0
+    text = apath.read_text()
+    assert '"error_code":"value_error"' in text and "secret" not in text and "alice" not in text

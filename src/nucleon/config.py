@@ -124,6 +124,19 @@ class LabelsConfig(BaseModel):
         return v
 
 
+class AnalysisConfig(BaseModel):
+    """Error analysis (R-008). Stage 2 = metadata-only records; Stage 3 = content,
+    needs ``verbose`` plus a separate explicit per-message confirmation."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    path: str = "nucleon-state/analysis.jsonl"
+    verbose: bool = False  # Stage 3 toggle; never sufficient on its own
+    verbose_path: str = "nucleon-state/analysis-stage3.jsonl"
+    verbose_ttl_seconds: int = Field(default=900, ge=1, le=3600)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +147,7 @@ class Config(BaseModel):
     journal: JournalConfig = Field(default_factory=JournalConfig)
     labels: LabelsConfig = Field(default_factory=LabelsConfig)
     marker: MarkerConfig = Field(default_factory=MarkerConfig)
+    analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
 
 
 def load_config(path: str) -> Config:

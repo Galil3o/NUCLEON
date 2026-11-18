@@ -11,6 +11,7 @@ from typing import Any, Callable
 from pydantic import ValidationError
 
 from nucleon.config import Config, load_config
+from nucleon.analysis import AnalysisLog
 from nucleon.engine import reconcile, run_once
 from nucleon.journal import build_journal
 from nucleon.marker import build_marker
@@ -71,7 +72,8 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
     try:
         store, classifier, journal = deps(cfg)
         if args.command == "run":
-            r = run_once(store, classifier, journal, cfg, build_marker(cfg.marker))
+            analysis = AnalysisLog(cfg.analysis.path) if cfg.analysis.enabled else None
+            r = run_once(store, classifier, journal, cfg, build_marker(cfg.marker), analysis)
             print(f"processed={r.processed} skipped={r.skipped} labeled={r.labeled} "
                   f"drafted={r.drafted} trashed={r.trashed} errors={r.errors} "
                   f"vanished={r.vanished}")

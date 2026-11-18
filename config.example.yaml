@@ -36,3 +36,13 @@ journal:
   enabled: false
   backend: file
   path: null
+
+analysis:                 # error analysis (DECISIONS section 5); off by default
+  enabled: false          # Stage 2: one metadata-only record per failed message
+                          # (error code, failing stage, duration, pseudonymised refs;
+                          # NEVER subject/body/addresses/server replies/model text)
+  path: nucleon-state/analysis.jsonl
+  verbose: false          # Stage 3 (content): off; also needs a separate explicit
+                          # per-message confirmation, never automatic; purged after the ttl
+  verbose_path: nucleon-state/analysis-stage3.jsonl
+  verbose_ttl_seconds: 900
