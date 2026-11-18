@@ -5,13 +5,23 @@ from email import message_from_bytes
 from typing import Iterator
 
 from nucleon.budgets import BudgetExceeded
-from nucleon.mailstore import BodyFetch, StaleReferenceError
+from nucleon.mailstore import (
+    BodyFetch,
+    PreflightReport,
+    PreflightRequest,
+    StaleReferenceError,
+)
 from nucleon.models import MessageMeta, MessageRef
 
 
 class FakeMailStore:
     def __init__(self, max_message_bytes: int | None = None,
-                 max_body_bytes: int | None = None) -> None:
+                 max_body_bytes: int | None = None,
+                 append_returns_uid: bool = True) -> None:
+        self._append_returns_uid = append_returns_uid  # False: provider gives no APPENDUID
+        self.preflight_requests: list[PreflightRequest] = []
+        self.preflight_problems: tuple[str, ...] = ()
+        self.write_log: list[str] = []  # "preflight" / "append" / "label" / "trash", in order
         self._max_message = max_message_bytes
         self._max_body = max_body_bytes
         self._sizes: dict[str, int] = {}
@@ -84,17 +94,27 @@ class FakeMailStore:
     def list_sent(self, since_days: int, limit: int) -> list[MessageMeta]:
         return self._sent[:limit]
 
+    def preflight(self, req: PreflightRequest) -> PreflightReport:
+        self.preflight_requests.append(req)
+        self.write_log.append("preflight")
+        return PreflightReport(problems=self.preflight_problems)
+
     def append_draft(self, target: str, mime_bytes: bytes) -> MessageRef:
+        self.write_log.append("append")
         self.appended_drafts.append((target, mime_bytes))
         mid = message_from_bytes(mime_bytes)["Message-ID"]
+        if not self._append_returns_uid:  # like a server without UIDPLUS: location unknown
+            return MessageRef.from_source("fake", target, 0, 0, mid, mime_bytes)
         return MessageRef.from_source(
             "fake", target, 1, len(self.appended_drafts), mid, mime_bytes
         )
 
     def set_label(self, ref: MessageRef, label: str) -> None:
         self._check(ref)
+        self.write_log.append("label")
         self.labels.append((ref, label))
 
     def move_to_trash(self, ref: MessageRef) -> None:
         self._check(ref)
+        self.write_log.append("trash")
         self.moved_to_trash.append(ref)

@@ -104,6 +104,9 @@ class DraftConfig(BaseModel):
 
     target: Literal["drafts", "outbox"] = "outbox"
     label: str = "nucleon/proposed"
+    # R-010: let the preflight CREATE missing non-system folders (outbox/labels).
+    # Off by default: a missing folder blocks the write run instead.
+    create_missing_folders: bool = False
 
 
 class CleanupConfig(BaseModel):
