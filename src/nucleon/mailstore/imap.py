@@ -251,6 +251,8 @@ class ImapMailStore:
             subject=str(msg["Subject"] or ""),
             from_addr=from_list[0] if from_list else "",
             to_addrs=self._addrs(msg, "To"),
+            cc_addrs=self._addrs(msg, "Cc"),
+            reply_to=(self._addrs(msg, "Reply-To") or [None])[0],
             date=date,
             in_reply_to=irt,
             references=refs,

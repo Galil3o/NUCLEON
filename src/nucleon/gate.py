@@ -10,6 +10,7 @@ import re
 from collections.abc import Iterable
 
 from nucleon.config import Config
+from nucleon.recipients import ContactBook, resolve
 from nucleon.models import (
     Action,
     ApplyLabel,
@@ -62,6 +63,7 @@ def decide(
     meta: MessageMeta,
     cfg: Config,
     system_folders: Iterable[str] = (),
+    contacts: ContactBook | None = None,
 ) -> list[Action]:
     system = frozenset(f.casefold() for f in system_folders)
     actions: list[Action] = [ApplyLabel(ref=meta.ref, label=l)
@@ -73,12 +75,21 @@ def decide(
         refs = list(meta.references)
         if meta.message_id and meta.message_id not in refs:
             refs.append(meta.message_id)
+        # R-009: the gate alone decides the recipients. Model proposals count
+        # only in model-decided mode and only against approved contacts.
+        book = contacts if contacts is not None else ContactBook.from_config(cfg)
+        res = resolve(meta, classification.proposed_recipients, cfg, book)
+        to_lines = [r.address for r in res.recipients if r.role == "to"]
         actions.append(
             StageDraft(
                 ref=meta.ref,
                 subject=classification.draft_subject or ("Re: " + meta.subject),
                 body=classification.draft_body,
-                to=meta.from_addr,
+                to=", ".join(to_lines) if to_lines else None,
+                recipients=res.recipients,
+                review_required=res.review_required,
+                banner=cfg.recipients.banner_language
+                if (cfg.recipients.banner and res.differs_from_sender) else None,
                 in_reply_to=meta.message_id,
                 references=tuple(refs),
                 target=cfg.draft.target,

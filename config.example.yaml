@@ -60,4 +60,13 @@ limits:                   # size/count budgets (R-011); overruns are reported pe
   max_labels_per_message: 10
   max_actions_per_message: 20
 
+recipients:               # per account; reply recipients + the address boundary (R-009)
+  mode: sender-only       # sender-only | sender-and-recipients | model-decided
+  contacts: []            # approved addresses: the ONLY ones a model proposal may resolve to
+  own_addresses: []       # excluded from reply-all (your login is excluded automatically)
+  learned_enabled: false  # opt-in: history-learned addresses, separate store, OFF by default
+  learned_path: nucleon-state/contacts-learned.jsonl
+  banner: true            # first-block warning in the draft when recipients differ (opt-out)
+  banner_language: de     # de | en
+
 registry_path: nucleon-state/accounts.json   # account id -> identity fingerprint (hashes only)

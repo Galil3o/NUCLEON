@@ -6,6 +6,7 @@ is Trash-only.
 from __future__ import annotations
 
 import hashlib
+import html
 from collections.abc import Callable
 from email.message import EmailMessage
 from typing import Optional
@@ -27,6 +28,43 @@ def message_id_hash(message_id: str) -> str:
     return hashlib.sha256(message_id.encode()).hexdigest()
 
 
+_SOURCE_LABEL = {
+    "de": {"from": "Absender", "reply-to": "Reply-To", "original-recipient": "urspr. Empfänger",
+           "contact": "Kontakt", "learned": "gelernt"},
+    "en": {"from": "sender", "reply-to": "Reply-To", "original-recipient": "original recipient",
+           "contact": "contact", "learned": "learned"},
+}
+_TEXT = {
+    "de": {"head": "ACHTUNG: ABWEICHENDE EMPFÄNGER", "to": "An", "cc": "Cc",
+           "review": "Zur Prüfung, NICHT als Empfänger eingetragen",
+           "del": "VOR DEM SENDEN LÖSCHEN / DELETE BEFORE SENDING", "end": "ENDE DES HINWEISES"},
+    "en": {"head": "WARNING: DIFFERENT RECIPIENTS", "to": "To", "cc": "Cc",
+           "review": "For review, NOT added as a recipient",
+           "del": "VOR DEM SENDEN LÖSCHEN / DELETE BEFORE SENDING", "end": "END OF NOTICE"},
+}
+
+
+def _banner_lines(action: StageDraft, lang: str) -> list[str]:
+    """Generated from the SAME recipient lines that become the headers (R-009)."""
+    t, lab = _TEXT[lang], _SOURCE_LABEL[lang]
+    lines = [f"⚠ {t['head']} ⚠"]
+    for role in ("to", "cc"):
+        picked = [r for r in action.recipients if r.role == role]
+        if picked:
+            lines.append(f"{t[role]}: " + ", ".join(f"{r.address} ({lab[r.source]})" for r in picked))
+    if action.review_required:
+        lines.append(f"{t['review']}: " + ", ".join(action.review_required))
+    lines.append(f"— {t['del']} —")
+    lines.append(f"⚠ {t['end']} ⚠")
+    return lines
+
+
+def _banner_html(lines: list[str]) -> str:
+    inner = "<br>".join(html.escape(l) for l in lines)
+    return ('<div style="background-color:#ffff00;color:#c00000;font-weight:bold;'
+            f'padding:8px;border:2px solid #c00000">{inner}</div>')
+
+
 def execute(
     action: Action,
     store: MailStore,
@@ -45,13 +83,28 @@ def execute(
         mid = draft_message_id(action.ref.processing_key())
         msg["Message-ID"] = mid
         msg["Subject"] = action.subject
-        if action.to is not None:
-            msg["To"] = action.to
+        if action.recipients:
+            to_hdr = ", ".join(r.address for r in action.recipients if r.role == "to")
+            cc_hdr = ", ".join(r.address for r in action.recipients if r.role == "cc")
+        else:
+            to_hdr, cc_hdr = action.to, ""
+        if to_hdr:
+            msg["To"] = to_hdr
+        if cc_hdr:
+            msg["Cc"] = cc_hdr
         if action.in_reply_to is not None:
             msg["In-Reply-To"] = action.in_reply_to
         if action.references:
             msg["References"] = " ".join(action.references)
-        msg.set_content(action.body)
+        if action.banner is not None:
+            blines = _banner_lines(action, action.banner)
+            msg.set_content("\n".join(blines) + "\n\n" + action.body)  # plain keeps ⚠ … ⚠
+            msg.add_alternative(
+                "<html><body>" + _banner_html(blines)
+                + '<div style="white-space:pre-wrap">' + html.escape(action.body)
+                + "</div></body></html>", subtype="html")
+        else:
+            msg.set_content(action.body)
         mhash = message_id_hash(mid)
         if on_draft_intent is not None:
             on_draft_intent(DraftRef(target=action.target, message_id_hash=mhash))

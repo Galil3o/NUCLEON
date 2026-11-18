@@ -22,6 +22,7 @@ from nucleon.marker import ProcessingMarker
 from nucleon.mailstore import MailStore, StaleReferenceError
 from nucleon.models import ApplyLabel, DeleteToTrash, DraftRef, JournalEntry, StageDraft
 from nucleon.quarantine import Classifier
+from nucleon.recipients import ContactBook
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ def run_once(
     cfg: Config,
     marker: ProcessingMarker,
     analysis: AnalysisLog | None = None,
+    contacts: ContactBook | None = None,
 ) -> RunReport:
     # R-003: a write run without an effective marker would duplicate drafts on
     # every repeat, so it is refused outright (the audit journal is optional).
@@ -99,7 +101,8 @@ def run_once(
             stage = "classify"
             classification = classifier.classify(meta, body)
             stage = "gate"
-            acts = gate.decide(classification, meta, cfg, store.system_folders())
+            acts = gate.decide(classification, meta, cfg, store.system_folders(),
+                               contacts=contacts)
             acts, over = cap_actions(acts, lim.max_labels_per_message,
                                      lim.max_actions_per_message)
             for kind, limit, observed in over:

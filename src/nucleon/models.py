@@ -83,6 +83,9 @@ class MessageMeta(BaseModel):
     references: list[str] = []
     # Plaintext Message-ID: transient, used only for reply threading; never persisted.
     message_id: Optional[str] = None
+    # R-009: header-derived recipient candidates (untrusted data, resolved by the gate).
+    reply_to: Optional[str] = None
+    cc_addrs: list[str] = []
 
 
 class Classification(BaseModel):
@@ -92,6 +95,9 @@ class Classification(BaseModel):
     needs_reply: bool
     draft_subject: Optional[str] = None
     draft_body: Optional[str] = None
+    # R-009: UNTRUSTED proposals. Only the gate decides which (if any) become
+    # recipients, and only via approved contacts; see nucleon.recipients.
+    proposed_recipients: list[str] = []
 
 
 class ApplyLabel(BaseModel):
@@ -99,6 +105,17 @@ class ApplyLabel(BaseModel):
 
     ref: MessageRef
     label: str
+
+
+class RecipientLine(BaseModel):
+    """A FINAL recipient with its provenance (R-009)."""
+
+    model_config = ConfigDict(frozen=True)
+
+    address: str
+    source: Literal["from", "reply-to", "original-recipient", "contact", "learned"]
+    role: Literal["to", "cc"]
+    origin: Optional[str] = None  # e.g. the pseudonymised origin of a learned address
 
 
 class StageDraft(BaseModel):
@@ -112,6 +129,11 @@ class StageDraft(BaseModel):
     references: tuple[str, ...] = ()
     target: str
     label: Optional[str] = None
+    # R-009: the FINAL recipients (headers and banner are both generated from
+    # these), addresses held back for review, and the banner language (None = off).
+    recipients: tuple[RecipientLine, ...] = ()
+    review_required: tuple[str, ...] = ()
+    banner: Optional[Literal["de", "en"]] = None
 
 
 class DeleteToTrash(BaseModel):
