@@ -43,6 +43,29 @@ capability** instead. The security boundary is not *what the model reads* but
 output is always treated as untrusted input to a deterministic gate; the gate,
 not the model, authorizes actions.
 
+### Trust-boundary crossings (R-007)
+
+Two crossings are explicit parts of the threat model, not implementation
+details:
+
+1. **Data transfer TO the model.** The quarantined classifier sends message
+   text, subject and addresses to an HTTP endpoint. That endpoint is a
+   **privacy boundary**. Loopback endpoints (`127.0.0.1`, `::1`, `localhost`)
+   are allowed by default. A **remote** endpoint is accepted only with an
+   explicit `classifier.allow_remote: true` **and** TLS (`https`); plaintext
+   `http://` to a remote host is a config validation error. Endpoint URLs may
+   not embed credentials. Policy: Nucleon logs and persists **no** message
+   content and no model output text (journal, marker and analysis records
+   hold hashes and fixed-schema metadata only). What the endpoint operator
+   logs or stores is outside Nucleon's control; choosing a remote endpoint
+   means accepting that operator's retention policy. Prefer a local model for
+   mail you would not send to a third party.
+2. **Sending FROM the mailbox.** Anything the mailbox can send (replies,
+   forwards) leaves the trust boundary toward a third party. Nucleon therefore
+   has no send path: it only stages drafts, and the human's native Send is the
+   crossing. Reply/forward recipients are never taken blindly from model output
+   (see the recipient boundary in the v0.2 decisions).
+
 ## The gate: reversible vs. irreversible
 
 - **Reversible actions** — label, move/file, archive, and **move to Trash**.

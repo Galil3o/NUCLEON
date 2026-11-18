@@ -1,10 +1,12 @@
 """Typed configuration for Nucleon. Holds no account identity or secrets."""
 from __future__ import annotations
 
+import ipaddress
 from typing import Literal
+from urllib.parse import urlsplit
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class MailConfig(BaseModel):
@@ -19,11 +21,55 @@ class MailConfig(BaseModel):
     limit: int = 50
 
 
+def _is_loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False  # any other name (even "127.0.0.1.evil.example") is remote
+
+
 class ClassifierConfig(BaseModel):
+    """The model endpoint is a PRIVACY BOUNDARY (R-007).
+
+    The classifier sends message text, subject and addresses to this URL.
+    Loopback endpoints (127.0.0.0/8, ::1, ``localhost``) are allowed by default.
+    Any other host is "remote" and needs BOTH an explicit ``allow_remote: true``
+    AND ``https`` (TLS); plaintext http to a remote host is always rejected.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     endpoint: str
     model: str
+    allow_remote: bool = False
+
+    @model_validator(mode="after")
+    def _endpoint_is_privacy_safe(self) -> "ClassifierConfig":
+        try:
+            parts = urlsplit(self.endpoint)
+            host = parts.hostname
+            parts.port  # noqa: B018 (raises ValueError on a malformed port)
+        except ValueError as e:
+            raise ValueError("classifier.endpoint is not a valid URL") from e
+        if parts.scheme not in ("http", "https") or not host:
+            raise ValueError("classifier.endpoint must be an http(s) URL with a host")
+        if parts.username is not None or parts.password is not None or "@" in parts.netloc:
+            raise ValueError("classifier.endpoint must not embed credentials")
+        if _is_loopback_host(host):
+            return self
+        if parts.scheme != "https":
+            raise ValueError(
+                "classifier.endpoint: a remote model endpoint requires TLS (https); "
+                "plaintext http to a remote host is rejected"
+            )
+        if not self.allow_remote:
+            raise ValueError(
+                "classifier.endpoint is remote: mail content would leave this machine; "
+                "set classifier.allow_remote: true to opt in explicitly"
+            )
+        return self
 
 
 class DraftConfig(BaseModel):

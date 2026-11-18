@@ -9,8 +9,12 @@ mail:
   limit: 50
 
 classifier:
-  endpoint: http://127.0.0.1:11434   # local model endpoint
+  endpoint: http://127.0.0.1:11434   # local model endpoint (default-allowed)
   model: your-model-name
+  # PRIVACY BOUNDARY: subject, addresses and body text are sent to this endpoint.
+  # A non-loopback endpoint needs allow_remote: true AND an https:// URL;
+  # plaintext http to a remote host is rejected at config load.
+  allow_remote: false
 
 draft:
   target: outbox            # "outbox" or "drafts"
