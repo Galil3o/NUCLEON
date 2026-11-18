@@ -4,12 +4,17 @@ from __future__ import annotations
 from email import message_from_bytes
 from typing import Iterator
 
-from nucleon.mailstore import StaleReferenceError
+from nucleon.budgets import BudgetExceeded
+from nucleon.mailstore import BodyFetch, StaleReferenceError
 from nucleon.models import MessageMeta, MessageRef
 
 
 class FakeMailStore:
-    def __init__(self) -> None:
+    def __init__(self, max_message_bytes: int | None = None,
+                 max_body_bytes: int | None = None) -> None:
+        self._max_message = max_message_bytes
+        self._max_body = max_body_bytes
+        self._sizes: dict[str, int] = {}
         self._inbox: list[MessageMeta] = []
         self._bodies: dict[str, str] = {}
         self._sent: list[MessageMeta] = []
@@ -31,9 +36,10 @@ class FakeMailStore:
         if self._validity.get(ref.mailbox, 1) != ref.uidvalidity:
             raise StaleReferenceError(ref.mailbox)
 
-    def seed_inbox(self, meta: MessageMeta, body: str) -> None:
+    def seed_inbox(self, meta: MessageMeta, body: str, size: int | None = None) -> None:
         self._inbox.append(meta)
         self._bodies[meta.ref.key()] = body
+        self._sizes[meta.ref.key()] = size if size is not None else len(body.encode())
 
     def seed_sent(self, meta: MessageMeta) -> None:
         self._sent.append(meta)
@@ -56,6 +62,17 @@ class FakeMailStore:
         self._check(ref)
         # Deliberately does not touch self.seen (models BODY.PEEK).
         return self._bodies[ref.key()]
+
+    def fetch_body(self, ref: MessageRef) -> BodyFetch:
+        self._check(ref)
+        size = self._sizes[ref.key()]
+        if self._max_message is not None and size > self._max_message:
+            raise BudgetExceeded("message_size", self._max_message, size)
+        text = self._bodies[ref.key()]
+        raw = text.encode()
+        if self._max_body is not None and len(raw) > self._max_body:
+            return BodyFetch(raw[: self._max_body].decode("utf-8", "ignore"), True, len(raw))
+        return BodyFetch(text, False, len(raw))
 
     def find_draft(self, target: str, message_id: str) -> list[MessageRef]:
         out = []

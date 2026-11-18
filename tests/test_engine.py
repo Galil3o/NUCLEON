@@ -216,14 +216,14 @@ def test_r002_stale_ref_during_actions_stops_further_actions(tmp_path):
     """UIDVALIDITY flips between fetch and the label/trash step: no UID-based write."""
     store, j = FakeMailStore(), _journal(tmp_path)
     store.seed_inbox(_meta(), "body")
-    real_fetch = store.fetch_body_text
+    real_fetch = store.fetch_body
 
     def flip(ref):
-        text = real_fetch(ref)
+        got = real_fetch(ref)
         store.set_uidvalidity("INBOX", 9)
-        return text
+        return got
 
-    store.fetch_body_text = flip  # type: ignore[method-assign]
+    store.fetch_body = flip  # type: ignore[method-assign]
     cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
     report = run_once(store, FakeClassifier(_cls(category="newsletter")), j, cfg, _marker(tmp_path))
     assert report.vanished == 1 and store.labels == [] and store.moved_to_trash == []

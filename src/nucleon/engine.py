@@ -9,7 +9,10 @@ from datetime import datetime, timezone
 from typing import Literal
 
 from nucleon import actions as actions_mod
-from nucleon.analysis import AnalysisLog
+import logging
+
+from nucleon.analysis import AnalysisLog, pseudonym
+from nucleon.budgets import BudgetEvent, BudgetExceeded, cap_actions
 from nucleon.actions import draft_message_id
 from nucleon import gate
 from nucleon.config import Config
@@ -29,6 +32,13 @@ class RunReport:
     trashed: int = 0
     errors: int = 0
     vanished: int = 0
+    # R-011: messages rejected by a hard size budget, and every visible overrun
+    # (rejected or truncated) per message. Metadata only.
+    over_budget: int = 0
+    budget_events: tuple[BudgetEvent, ...] = ()
+
+
+_log = logging.getLogger("nucleon.budget")
 
 
 def run_once(
@@ -44,6 +54,16 @@ def run_once(
     if marker is None:
         raise ValueError("run_once requires a processing marker")
     processed = skipped = labeled = drafted = trashed = errors = vanished = 0
+    over_budget = 0
+    events: list[BudgetEvent] = []
+    lim = cfg.limits
+
+    def _event(ref, kind, outcome, limit, observed) -> None:
+        ev = BudgetEvent(kind=kind, outcome=outcome, limit=limit, observed=observed,
+                         ref_pseudonym=pseudonym(ref.processing_key()))
+        events.append(ev)
+        _log.warning("budget %s %s limit=%d observed=%d ref=%s", ev.kind, ev.outcome,
+                     ev.limit, ev.observed, ev.ref_pseudonym)  # metadata only
     # R-005: the limit bounds the WORK left after the marker/journal filter,
     # not the window, so older unprocessed mail cannot starve behind newer
     # mail. Oldest-first iteration makes progress strictly monotonic.
@@ -67,11 +87,22 @@ def run_once(
         # text is deliberately NOT recorded (it may carry untrusted content).
         try:
             meta = store.fetch_meta(ref)
-            body = store.fetch_body_text(ref)
+            fetched = store.fetch_body(ref)  # size/structure checked before loading
+            body = fetched.text
+            if fetched.truncated:
+                _event(ref, "body_bytes", "truncated", lim.max_body_bytes,
+                       fetched.original_bytes or 0)
+            if len(body) > lim.max_model_input_chars:
+                _event(ref, "model_input", "truncated", lim.max_model_input_chars, len(body))
+                body = body[: lim.max_model_input_chars]
             stage = "classify"
             classification = classifier.classify(meta, body)
             stage = "gate"
             acts = gate.decide(classification, meta, cfg, store.system_folders())
+            acts, over = cap_actions(acts, lim.max_labels_per_message,
+                                     lim.max_actions_per_message)
+            for kind, limit, observed in over:
+                _event(ref, kind, "truncated", limit, observed)
             stage = "act"
             did_draft = did_trash = False
             n_labeled = 0
@@ -114,6 +145,13 @@ def run_once(
             # message. Treat as vanished: no further action, nothing recorded.
             vanished += 1
             continue
+        except BudgetExceeded as be:
+            # R-011: this message is rejected visibly; no retry, run continues.
+            marker.mark(pkey, "error", tuple(steps))
+            _record(journal, ref, "classified", "error")
+            _event(ref, be.kind, "rejected", be.limit, be.observed)
+            over_budget += 1
+            continue
         except Exception as exc:
             # Completed sub-steps and the draft reference stay in the marker
             # (R-004); only the status changes. No automatic retry.
@@ -126,7 +164,8 @@ def run_once(
         drafted += did_draft
         trashed += did_trash
         processed += 1
-    return RunReport(processed, skipped, labeled, drafted, trashed, errors, vanished)
+    return RunReport(processed, skipped, labeled, drafted, trashed, errors, vanished,
+                     over_budget, tuple(events))
 
 
 def _stage2(analysis, cfg, stage, exc, t0, ref, steps) -> None:

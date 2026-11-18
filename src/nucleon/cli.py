@@ -41,8 +41,15 @@ def build_default_deps(cfg: Config) -> tuple[Any, Any, Any]:
         conn.starttls(ssl_context=context)
     conn.login(cfg.mail.username, password)
     account_hash = hashlib.sha256(cfg.mail.username.encode()).hexdigest()
-    store = ImapMailStore(conn, account_hash)
-    classifier = LLMClassifier(cfg.classifier.endpoint, cfg.classifier.model)
+    lim = cfg.limits
+    store = ImapMailStore(
+        conn, account_hash, max_message_bytes=lim.max_message_bytes,
+        max_body_bytes=lim.max_body_bytes, max_header_bytes=lim.max_header_bytes,
+    )
+    classifier = LLMClassifier(
+        cfg.classifier.endpoint, cfg.classifier.model,
+        max_response_bytes=lim.max_model_response_bytes,
+    )
     return store, classifier, build_journal(cfg.journal)
 
 
@@ -76,7 +83,10 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
             r = run_once(store, classifier, journal, cfg, build_marker(cfg.marker), analysis)
             print(f"processed={r.processed} skipped={r.skipped} labeled={r.labeled} "
                   f"drafted={r.drafted} trashed={r.trashed} errors={r.errors} "
-                  f"vanished={r.vanished}")
+                  f"vanished={r.vanished} over_budget={r.over_budget}")
+            for ev in r.budget_events:  # per-message visibility; no content, pseudonym only
+                print(f"budget: kind={ev.kind} outcome={ev.outcome} limit={ev.limit} "
+                      f"observed={ev.observed} ref={ev.ref_pseudonym}")
         else:
             rep = reconcile(store, journal, cfg)
             print(f"reconciled={rep.sent} observed={rep.observed}")
