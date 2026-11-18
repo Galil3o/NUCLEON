@@ -51,6 +51,26 @@ class MessageRef(BaseModel):
         return f"{self.key()}:{self.message_id_hash or '-'}"
 
 
+class DraftRef(BaseModel):
+    """Stable reference to a staged draft (R-004), hashes/ids only.
+
+    ``message_id_hash`` is the hash of the deterministic Message-ID Nucleon
+    gives the draft, so the draft can be found again (and recognised in Sent)
+    without storing any plaintext. ``confirmed`` is True only when the provider
+    reported the location (APPENDUID); before the APPEND and after an unclear
+    result it is False.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    target: str
+    message_id_hash: str
+    confirmed: bool = False
+    mailbox: Optional[str] = None
+    uidvalidity: int = 0
+    uid: int = 0
+
+
 class MessageMeta(BaseModel):
     """In-memory only for the classifier; never persisted."""
 
@@ -114,6 +134,9 @@ class JournalEntry(BaseModel):
     uid: int
     message_id_hash: Optional[str] = None
     raw_hash: str
-    action: Literal["classified", "drafted", "trashed", "marked_sent"]
+    action: Literal["classified", "drafted", "trashed", "marked_sent", "observed_reply"]
     status: str
     ts: datetime
+    # R-004/R-006: stable draft identity (hash only) for exact reconcile.
+    draft_message_id_hash: Optional[str] = None
+    draft_confirmed: bool = False

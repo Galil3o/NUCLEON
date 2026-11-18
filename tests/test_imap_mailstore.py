@@ -257,3 +257,28 @@ def test_iter_window_stops_if_uidvalidity_changes_midway(store, conn):
     assert next(it).uid == 5
     store._conn = ChangedValidityConn()
     assert list(it) == []
+
+
+# -- R-004: read-only draft lookup --------------------------------------------
+def test_find_draft_is_read_only_search_by_message_id(store, conn):
+    refs = store.find_draft("drafts", "<nucleon-x@nucleon.invalid>")
+    assert [r.uid for r in refs] == [5, 6, 7] and refs[0].mailbox == "Drafts"
+    assert ("SELECT", "Drafts") in conn.cmds
+    search = [c for c in conn.cmds if c[:2] == ("UID", "SEARCH")][0]
+    assert search[3:] == ("HEADER", "Message-ID", "<nucleon-x@nucleon.invalid>")
+    assert {c[1] for c in conn.cmds if c[0] == "UID"} <= {"SEARCH", "FETCH"}
+    assert not any(c[0] == "APPEND" for c in conn.cmds)
+
+
+def test_find_draft_rejects_unknown_target(store):
+    with pytest.raises(ValueError):
+        store.find_draft("inbox", "<a@b>")
+
+
+def test_append_without_appenduid_is_reported_unconfirmed(conn):
+    class NoUid(FakeConn):
+        def append(self, *a):
+            return "OK", [b"done"]
+
+    ref = ImapMailStore(NoUid(), "acct").append_draft("drafts", FULL)
+    assert (ref.uidvalidity, ref.uid) == (0, 0)

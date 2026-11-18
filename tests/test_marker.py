@@ -77,3 +77,19 @@ def test_marker_config_has_no_off_switch():
             "marker": {"enabled": False},
         })
     assert MarkerEntry  # exported
+
+
+def test_marker_keeps_draft_ref_and_carries_it_over(tmp_path):
+    from nucleon.models import DraftRef
+
+    path = str(tmp_path / "m.jsonl")
+    m = ProcessingMarker(FileMarkerStore(path))
+    k = _ref().processing_key()
+    d = DraftRef(target="drafts", message_id_hash="ab" * 32, confirmed=True,
+                 mailbox="Drafts", uidvalidity=7, uid=3)
+    m.mark(k, "started", ("StageDraft:appended",), d)
+    m.mark(k, "error", ("StageDraft:appended",))  # no draft given: carried over
+    assert ProcessingMarker(FileMarkerStore(path)).entry(k).draft == d
+    assert [e.key for e in m.unfinished()] == [k]
+    m.mark(k, "ok", ("StageDraft",))
+    assert m.unfinished() == []

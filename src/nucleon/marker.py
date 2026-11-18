@@ -18,6 +18,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from nucleon.config import MarkerConfig
+from nucleon.models import DraftRef
 
 
 class MarkerEntry(BaseModel):
@@ -27,7 +28,10 @@ class MarkerEntry(BaseModel):
     # "started" is written before any mailbox write so that a crash mid-action
     # can never lead to a duplicate draft on the next run.
     status: Literal["started", "ok", "error"]
+    # Completed sub-steps, updated after EACH step (R-004), not only at the end.
     steps: tuple[str, ...] = ()
+    # Stable draft reference, recorded before/right after the APPEND (R-004).
+    draft: DraftRef | None = None
     ts: datetime
 
 
@@ -50,7 +54,7 @@ class FileMarkerStore:
         if parent:
             os.makedirs(parent, exist_ok=True)
         with open(self._path, "a", encoding="utf-8") as f:
-            f.write(entry.model_dump_json() + "\n")
+            f.write(entry.model_dump_json(exclude_none=True) + "\n")
             f.flush()
             os.fsync(f.fileno())
 
@@ -81,10 +85,22 @@ class ProcessingMarker:
     def entry(self, key: str) -> MarkerEntry | None:
         return self._latest.get(key)
 
+    def unfinished(self) -> list[MarkerEntry]:
+        """Entries not ended "ok": interrupted ("started") or failed ("error")."""
+        return [e for e in self._latest.values() if e.status != "ok"]
+
     def mark(
-        self, key: str, status: Literal["started", "ok", "error"], steps: tuple[str, ...] = ()
+        self,
+        key: str,
+        status: Literal["started", "ok", "error"],
+        steps: tuple[str, ...] = (),
+        draft: DraftRef | None = None,
     ) -> None:
-        entry = MarkerEntry(key=key, status=status, steps=steps, ts=datetime.now(timezone.utc))
+        if draft is None and key in self._latest:
+            draft = self._latest[key].draft  # a recorded draft reference is never lost
+        entry = MarkerEntry(
+            key=key, status=status, steps=steps, draft=draft, ts=datetime.now(timezone.utc)
+        )
         self._store.append(entry)  # durable first, then visible
         self._latest[key] = entry
 

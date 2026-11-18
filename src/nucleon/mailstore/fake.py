@@ -1,6 +1,7 @@
 """In-memory MailStore for tests."""
 from __future__ import annotations
 
+from email import message_from_bytes
 from typing import Iterator
 
 from nucleon.mailstore import StaleReferenceError
@@ -56,13 +57,21 @@ class FakeMailStore:
         # Deliberately does not touch self.seen (models BODY.PEEK).
         return self._bodies[ref.key()]
 
+    def find_draft(self, target: str, message_id: str) -> list[MessageRef]:
+        out = []
+        for i, (t, raw) in enumerate(self.appended_drafts, start=1):
+            if t == target and message_from_bytes(raw)["Message-ID"] == message_id:
+                out.append(MessageRef.from_source("fake", t, 1, i, message_id, raw))
+        return out
+
     def list_sent(self, since_days: int, limit: int) -> list[MessageMeta]:
         return self._sent[:limit]
 
     def append_draft(self, target: str, mime_bytes: bytes) -> MessageRef:
         self.appended_drafts.append((target, mime_bytes))
+        mid = message_from_bytes(mime_bytes)["Message-ID"]
         return MessageRef.from_source(
-            "fake", target, 1, len(self.appended_drafts), None, mime_bytes
+            "fake", target, 1, len(self.appended_drafts), mid, mime_bytes
         )
 
     def set_label(self, ref: MessageRef, label: str) -> None:

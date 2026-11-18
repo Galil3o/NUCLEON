@@ -87,8 +87,9 @@ class ImapMailStore:
         if validity == 0 or validity != ref.uidvalidity:
             raise StaleReferenceError(ref.mailbox)
 
-    def _select(self, mailbox: str) -> int:
-        _check(self._conn.select(mailbox), f"SELECT {mailbox}")
+    def _select(self, mailbox: str, readonly: bool = False) -> int:
+        resp = self._conn.select(mailbox, readonly=True) if readonly else self._conn.select(mailbox)
+        _check(resp, f"SELECT {mailbox}")
         try:
             _, vals = self._conn.response("UIDVALIDITY")
             return int(vals[0])
@@ -193,6 +194,19 @@ class ImapMailStore:
             raw = self._header_bytes(uid)
             out.append(self._meta_from(self._build_ref(self._sent, validity, uid, raw), raw))
         return out
+
+    def find_draft(self, target: str, message_id: str) -> list[MessageRef]:
+        """Read-only (EXAMINE + SEARCH + BODY.PEEK) lookup by Message-ID (R-004)."""
+        folders = {"drafts": self._drafts, "outbox": self._outbox}
+        if target not in folders:
+            raise ValueError(f"unknown draft target: {target!r}")
+        folder = folders[target]
+        validity = self._select(folder, readonly=True)
+        data = _check(
+            self._conn.uid("SEARCH", None, "HEADER", "Message-ID", message_id), "SEARCH"
+        )
+        uids = sorted(int(u) for u in (data[0] or b"").split())
+        return [self._build_ref(folder, validity, u, self._header_bytes(u)) for u in uids]
 
     def append_draft(self, target: str, mime_bytes: bytes) -> MessageRef:
         folders = {"drafts": self._drafts, "outbox": self._outbox}

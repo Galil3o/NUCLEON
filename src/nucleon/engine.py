@@ -5,13 +5,16 @@ import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from typing import Literal
+
 from nucleon import actions as actions_mod
+from nucleon.actions import draft_message_id
 from nucleon import gate
 from nucleon.config import Config
 from nucleon.journal import Journal
 from nucleon.marker import ProcessingMarker
 from nucleon.mailstore import MailStore, StaleReferenceError
-from nucleon.models import ApplyLabel, DeleteToTrash, JournalEntry, StageDraft
+from nucleon.models import ApplyLabel, DeleteToTrash, DraftRef, JournalEntry, StageDraft
 from nucleon.quarantine import Classifier
 
 
@@ -64,15 +67,31 @@ def run_once(
             did_draft = did_trash = False
             n_labeled = 0
             steps: list[str] = []
+            draft: list[DraftRef] = []  # latest stable draft reference (R-004)
             if acts:
                 # Durable BEFORE the first mailbox write: a crash mid-action
                 # then cannot cause a duplicate draft/label on the next run.
                 marker.mark(pkey, "started")
+
+            def _intent(d: DraftRef) -> None:
+                # Before the APPEND: if its outcome turns out unclear, the
+                # reference needed to look the draft up is already durable.
+                draft[:] = [d]
+                marker.mark(pkey, "started", tuple(steps), d)
+
+            def _appended(d: DraftRef) -> None:
+                # Right after the APPEND, before the draft label.
+                draft[:] = [d]
+                _add(steps, "StageDraft:appended")
+                marker.mark(pkey, "started", tuple(steps), d)
+
             for a in acts:
-                actions_mod.execute(a, store)
+                actions_mod.execute(
+                    a, store, on_draft_intent=_intent, on_draft_appended=_appended
+                )
                 step = type(a).__name__
-                if step not in steps:
-                    steps.append(step)
+                if _add(steps, step):
+                    marker.mark(pkey, "started", tuple(steps))  # sub-step is durable now
                 if isinstance(a, ApplyLabel):
                     n_labeled += 1
                 elif isinstance(a, StageDraft):
@@ -81,14 +100,16 @@ def run_once(
                     did_trash = True
             action = "drafted" if did_draft else "trashed" if did_trash else "classified"
             marker.mark(pkey, "ok", tuple(steps))
-            _record(journal, ref, action, "ok")
+            _record(journal, ref, action, "ok", draft[0] if draft else None)
         except StaleReferenceError:
             # R-002: UIDVALIDITY changed; the UID may now be a different
             # message. Treat as vanished: no further action, nothing recorded.
             vanished += 1
             continue
         except Exception:
-            marker.mark(pkey, "error")
+            # Completed sub-steps and the draft reference stay in the marker
+            # (R-004); only the status changes. No automatic retry.
+            marker.mark(pkey, "error", tuple(steps))
             _record(journal, ref, "classified", "error")
             errors += 1
             continue
@@ -99,7 +120,14 @@ def run_once(
     return RunReport(processed, skipped, labeled, drafted, trashed, errors, vanished)
 
 
-def _record(journal: Journal, ref, action: str, status: str) -> None:
+def _add(steps: list[str], step: str) -> bool:
+    if step in steps:
+        return False
+    steps.append(step)
+    return True
+
+
+def _record(journal: Journal, ref, action: str, status: str, draft: DraftRef | None = None) -> None:
     journal.record(
         JournalEntry(
             ref_key=ref.key(),
@@ -111,8 +139,41 @@ def _record(journal: Journal, ref, action: str, status: str) -> None:
             action=action,
             status=status,
             ts=datetime.now(timezone.utc),
+            draft_message_id_hash=draft.message_id_hash if draft else None,
+            draft_confirmed=draft.confirmed if draft else False,
         )
     )
+
+
+@dataclass(frozen=True)
+class PartialFinding:
+    key: str  # processing key of the source message (hashes only)
+    status: str  # marker status: "started" (interrupted) or "error"
+    steps: tuple[str, ...]
+    # "none": no draft was attempted; "present"/"absent": the read-only lookup
+    # found / did not find it; "unknown": the lookup itself failed.
+    draft_state: Literal["none", "present", "absent", "unknown"]
+
+
+def diagnose_partial(store: MailStore, marker: ProcessingMarker) -> list[PartialFinding]:
+    """Reconcile unclear/partial outcomes BEFORE anyone considers a retry (R-004).
+
+    STRICTLY READ-ONLY with respect to mail and calendar: the only store call
+    is ``find_draft`` (EXAMINE/SEARCH/PEEK). It never appends, labels, moves or
+    retries anything, and does not even write the marker. The retry policy for
+    partial runs is an owner decision; the safe default is no auto-retry.
+    """
+    out: list[PartialFinding] = []
+    for e in marker.unfinished():
+        state: Literal["none", "present", "absent", "unknown"] = "none"
+        if e.draft is not None:
+            try:
+                found = store.find_draft(e.draft.target, draft_message_id(e.key))
+                state = "present" if found else "absent"
+            except Exception:
+                state = "unknown"
+        out.append(PartialFinding(e.key, e.status, e.steps, state))
+    return out
 
 
 def reconcile(store: MailStore, journal: Journal, cfg: Config) -> int:

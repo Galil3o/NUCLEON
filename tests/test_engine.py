@@ -1,7 +1,7 @@
 import hashlib
 
 from nucleon.config import Config
-from nucleon.engine import RunReport, reconcile, run_once
+from nucleon.engine import RunReport, diagnose_partial, reconcile, run_once
 from nucleon.marker import FileMarkerStore, ProcessingMarker
 from nucleon.journal import FileJournalStore, NullJournal, StoredJournal
 from nucleon.mailstore.fake import FakeMailStore
@@ -338,3 +338,130 @@ def test_r005_limit_zero_processes_nothing(tmp_path):
     store.seed_inbox(_meta(), "body")
     r = run_once(store, FakeClassifier(_cls()), NullJournal(), _limited_cfg(0), _marker(tmp_path))
     assert r.processed == 0 and store.labels == []
+
+
+# -- R-004: partial actions, stable draft reference, read-only diagnosis -------
+class _WriteGuard:
+    """Wraps a store; every mailbox WRITE raises, reads pass through (and are logged)."""
+
+    WRITES = {"append_draft", "set_label", "move_to_trash"}
+
+    def __init__(self, inner):
+        self._inner, self.calls = inner, []
+
+    def __getattr__(self, name):
+        self.calls.append(name)
+        if name in self.WRITES:
+            raise AssertionError("diagnosis must not write: " + name)
+        return getattr(self._inner, name)
+
+
+def _partial_store(tmp_path, fail_label_with):
+    store = FakeMailStore()
+    store.seed_inbox(_meta(), "body")
+    real = store.set_label
+
+    def flaky(ref, label):
+        if label == "nucleon/proposed":
+            raise fail_label_with
+        real(ref, label)
+
+    store.set_label = flaky  # type: ignore[method-assign]
+    return store
+
+
+def test_r004_draft_ref_and_step_are_durable_before_the_next_step(tmp_path):
+    """Crash right after APPEND (during the draft label): marker already holds the ref."""
+    store = _partial_store(tmp_path, KeyboardInterrupt())
+    m = _meta()
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks"))
+    import pytest
+
+    with pytest.raises(KeyboardInterrupt):
+        run_once(store, clf, NullJournal(), _cfg(), _marker(tmp_path))
+    e = _marker(tmp_path).entry(m.ref.processing_key())  # fresh instance = from disk
+    assert e.status == "started"
+    assert "StageDraft:appended" in e.steps and "ApplyLabel" in e.steps
+    assert e.draft is not None and e.draft.confirmed and e.draft.uid == 1
+    assert e.draft.message_id_hash
+
+
+def test_r004_error_after_append_keeps_steps_and_draft_and_does_not_retry(tmp_path):
+    store = _partial_store(tmp_path, RuntimeError("boom"))
+    m = _meta()
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks"))
+    r1 = run_once(store, clf, NullJournal(), _cfg(), _marker(tmp_path))
+    e = _marker(tmp_path).entry(m.ref.processing_key())
+    assert r1.errors == 1 and e.status == "error"
+    assert "StageDraft:appended" in e.steps and e.draft is not None and e.draft.confirmed
+    r2 = run_once(store, clf, NullJournal(), _cfg(), _marker(tmp_path))
+    assert r2.skipped == 1 and r2.processed == 0 and r2.errors == 0
+    assert len(store.appended_drafts) == 1  # conservative default: no auto-retry
+
+
+def test_r004_intent_recorded_before_append_for_unclear_outcome(tmp_path):
+    """APPEND succeeds server-side but the client sees an error: intent is on disk."""
+    store = FakeMailStore()
+    m = _meta()
+    store.seed_inbox(m, "body")
+    real = store.append_draft
+
+    def lost_reply(target, mime):
+        real(target, mime)
+        raise TimeoutError("connection dropped after APPEND")
+
+    store.append_draft = lost_reply  # type: ignore[method-assign]
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks"))
+    run_once(store, clf, NullJournal(), _cfg(), _marker(tmp_path))
+    e = _marker(tmp_path).entry(m.ref.processing_key())
+    assert e.status == "error" and e.draft is not None and not e.draft.confirmed
+    assert "StageDraft:appended" not in e.steps
+    # read-only diagnosis can tell that the draft is in fact there
+    guard = _WriteGuard(store)
+    findings = diagnose_partial(guard, _marker(tmp_path))
+    assert [(f.key, f.draft_state) for f in findings] == [(m.ref.processing_key(), "present")]
+
+
+def test_r004_diagnosis_is_read_only_and_reports_absent_and_unknown(tmp_path):
+    store = FakeMailStore()
+    m1, m2 = _meta(uid=1, mid="<a@x>"), _meta(uid=2, mid="<b@x>")
+    store.seed_inbox(m1, "b"), store.seed_inbox(m2, "b")
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks"))
+    real = store.append_draft
+
+    def fail_before_append(target, mime):
+        raise ConnectionError("down")
+
+    store.append_draft = fail_before_append  # type: ignore[method-assign]
+    run_once(store, clf, NullJournal(), _cfg(), _marker(tmp_path))
+    store.append_draft = real  # type: ignore[method-assign]
+    guard = _WriteGuard(store)
+    f = {x.key: x.draft_state for x in diagnose_partial(guard, _marker(tmp_path))}
+    assert set(f.values()) == {"absent"}  # intent recorded, nothing on the server
+    assert not (set(guard.calls) & _WriteGuard.WRITES)
+
+    def broken_find(target, message_id):
+        raise ConnectionError("down")
+
+    store.find_draft = broken_find  # type: ignore[method-assign]
+    f = {x.key: x.draft_state for x in diagnose_partial(_WriteGuard(store), _marker(tmp_path))}
+    assert set(f.values()) == {"unknown"}
+
+
+def test_r004_diagnosis_does_not_touch_completed_messages_or_write_marker(tmp_path):
+    store = FakeMailStore()
+    store.seed_inbox(_meta(), "body")
+    run_once(store, FakeClassifier(_cls(needs_reply=True, draft_body="T")), NullJournal(),
+             _cfg(), _marker(tmp_path))
+    path = tmp_path / "marker.jsonl"
+    before = path.read_text()
+    assert diagnose_partial(_WriteGuard(store), _marker(tmp_path)) == []
+    assert path.read_text() == before
+
+
+def test_r004_journal_drafted_entry_carries_draft_reference(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.seed_inbox(_meta(), "body")
+    run_once(store, FakeClassifier(_cls(needs_reply=True, draft_body="Hi")), j, _cfg(), _marker(tmp_path))
+    e = j._store.entries()[0]
+    assert e.draft_message_id_hash and e.draft_confirmed is True
