@@ -14,7 +14,7 @@ classifier: {endpoint: "http://127.0.0.1:1", model: m}
 
 def _config(tmp_path) -> str:
     p = tmp_path / "config.yaml"
-    p.write_text(CONFIG, encoding="utf-8")
+    p.write_text(CONFIG + f"marker: {{path: {tmp_path / 'marker.jsonl'}}}\n", encoding="utf-8")
     return str(p)
 
 
@@ -32,7 +32,7 @@ def _seeded_store() -> FakeMailStore:
 def test_run_subcommand_invokes_engine(tmp_path, capsys):
     store = _seeded_store()
     clf = FakeClassifier(
-        Classification(category="personal", labels=["l1"], urgency="normal",
+        Classification(category="personal", labels=["nucleon/l1"], urgency="normal",
                        needs_reply=True, draft_body="Thanks")
     )
     rc = cli.main(["run", "--config", _config(tmp_path)],
@@ -79,3 +79,17 @@ def test_missing_config_returns_error(tmp_path, capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "nope.yaml" in err and "Traceback" not in err
+
+
+def test_run_twice_with_null_journal_creates_no_duplicate_draft(tmp_path, capsys):
+    store = _seeded_store()
+    clf = FakeClassifier(
+        Classification(category="personal", labels=["nucleon/l1"], urgency="normal",
+                       needs_reply=True, draft_body="Thanks")
+    )
+    cfgpath = _config(tmp_path)
+    for _ in range(2):
+        assert cli.main(["run", "--config", cfgpath],
+                        deps=lambda cfg: (store, clf, NullJournal())) == 0
+    assert len(store.appended_drafts) == 1
+    assert "skipped=1" in capsys.readouterr().out

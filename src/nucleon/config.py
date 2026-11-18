@@ -48,6 +48,15 @@ class JournalConfig(BaseModel):
     path: str | None = None
 
 
+class MarkerConfig(BaseModel):
+    """Always-on processing marker (R-003). No ``enabled`` switch by design."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    backend: Literal["file"] = "file"
+    path: str = "nucleon-state/processed.jsonl"
+
+
 class LabelsConfig(BaseModel):
     """R-001: where model-proposed labels may point.
 
@@ -78,6 +87,7 @@ class Config(BaseModel):
     cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
     journal: JournalConfig = Field(default_factory=JournalConfig)
     labels: LabelsConfig = Field(default_factory=LabelsConfig)
+    marker: MarkerConfig = Field(default_factory=MarkerConfig)
 
 
 def load_config(path: str) -> Config:

@@ -16,6 +16,7 @@ from nucleon.config import Config  # noqa: E402
 from nucleon.engine import reconcile, run_once  # noqa: E402
 from nucleon.gate import decide  # noqa: E402
 from nucleon.journal import FileJournalStore, StoredJournal, build_journal  # noqa: E402
+from nucleon.marker import build_marker  # noqa: E402
 from nucleon.mailstore.fake import FakeMailStore  # noqa: E402
 from nucleon.models import (  # noqa: E402
     ApplyLabel, Classification, DeleteToTrash, MessageMeta, MessageRef, StageDraft,
@@ -38,13 +39,13 @@ class DemoClassifier:
         s = meta.subject.lower()
         if "lunch" in s:
             return Classification(
-                category="personal", labels=["personal", "follow-up"], urgency="normal",
+                category="personal", labels=["nucleon/personal", "nucleon/follow-up"], urgency="normal",
                 needs_reply=True,
                 draft_body="Hi,\n\nThursday at noon works for me. See you then!\n")
         if "newsletter" in s:
-            return Classification(category="newsletter", labels=["newsletter"],
+            return Classification(category="newsletter", labels=["nucleon/newsletter"],
                                   urgency="low", needs_reply=False)
-        return Classification(category="notification", labels=["notification"],
+        return Classification(category="notification", labels=["nucleon/notification"],
                               urgency="low", needs_reply=False)
 
 
@@ -69,6 +70,7 @@ def main() -> None:
         "draft": {"target": "drafts", "label": "nucleon/proposed"},
         "cleanup": {"auto_trash_enabled": True, "auto_trash_categories": ["newsletter"]},
         "journal": {"enabled": True, "backend": "file", "path": journal_path},
+        "marker": {"backend": "file", "path": os.path.join(tmp, "marker.jsonl")},
     })
 
     store = FakeMailStore()
@@ -104,7 +106,7 @@ def main() -> None:
 
     section("3. Engine run_once")
     journal = build_journal(cfg.journal)
-    report = run_once(store, clf, journal, cfg)
+    report = run_once(store, clf, journal, cfg, build_marker(cfg.marker))
     print("  (executing the gate's actions against the fake store)")
 
     section("4. What the fake store recorded")

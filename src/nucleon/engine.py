@@ -9,6 +9,7 @@ from nucleon import actions as actions_mod
 from nucleon import gate
 from nucleon.config import Config
 from nucleon.journal import Journal
+from nucleon.marker import ProcessingMarker
 from nucleon.mailstore import MailStore, StaleReferenceError
 from nucleon.models import ApplyLabel, DeleteToTrash, JournalEntry, StageDraft
 from nucleon.quarantine import Classifier
@@ -26,12 +27,21 @@ class RunReport:
 
 
 def run_once(
-    store: MailStore, classifier: Classifier, journal: Journal, cfg: Config
+    store: MailStore,
+    classifier: Classifier,
+    journal: Journal,
+    cfg: Config,
+    marker: ProcessingMarker,
 ) -> RunReport:
+    # R-003: a write run without an effective marker would duplicate drafts on
+    # every repeat, so it is refused outright (the audit journal is optional).
+    if marker is None:
+        raise ValueError("run_once requires a processing marker")
     processed = skipped = labeled = drafted = trashed = errors = vanished = 0
     refs = store.list_window(cfg.mail.mailbox, cfg.mail.since_days, cfg.mail.limit)
     for ref in refs:
-        if journal.has_processed(ref.key()):
+        pkey = ref.processing_key()
+        if marker.is_done(pkey) or journal.has_processed(ref.key()):
             skipped += 1
             continue
         # Conservative policy: errors are surfaced, not auto-retried. A failing
@@ -46,8 +56,16 @@ def run_once(
             acts = gate.decide(classification, meta, cfg, store.system_folders())
             did_draft = did_trash = False
             n_labeled = 0
+            steps: list[str] = []
+            if acts:
+                # Durable BEFORE the first mailbox write: a crash mid-action
+                # then cannot cause a duplicate draft/label on the next run.
+                marker.mark(pkey, "started")
             for a in acts:
                 actions_mod.execute(a, store)
+                step = type(a).__name__
+                if step not in steps:
+                    steps.append(step)
                 if isinstance(a, ApplyLabel):
                     n_labeled += 1
                 elif isinstance(a, StageDraft):
@@ -55,6 +73,7 @@ def run_once(
                 elif isinstance(a, DeleteToTrash):
                     did_trash = True
             action = "drafted" if did_draft else "trashed" if did_trash else "classified"
+            marker.mark(pkey, "ok", tuple(steps))
             _record(journal, ref, action, "ok")
         except StaleReferenceError:
             # R-002: UIDVALIDITY changed; the UID may now be a different
@@ -62,6 +81,7 @@ def run_once(
             vanished += 1
             continue
         except Exception:
+            marker.mark(pkey, "error")
             _record(journal, ref, "classified", "error")
             errors += 1
             continue

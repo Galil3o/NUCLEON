@@ -45,6 +45,12 @@ class MessageRef(BaseModel):
         return f"{self.account_hash}:{self.mailbox}:{self.uidvalidity}:{self.uid}"
 
 
+    def processing_key(self) -> str:
+        """Stable processing identity for the idempotency marker (R-003):
+        account + folder + UIDVALIDITY + UID + Message-ID hash. Hashes only."""
+        return f"{self.key()}:{self.message_id_hash or '-'}"
+
+
 class MessageMeta(BaseModel):
     """In-memory only for the classifier; never persisted."""
 

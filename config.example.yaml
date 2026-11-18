@@ -20,6 +20,14 @@ cleanup:
   auto_trash_enabled: false
   auto_trash_categories: []
 
+labels:
+  namespace: "nucleon/"   # model labels are only honoured inside this namespace
+  allowed: []             # plus exact, operator-approved target folders (never system folders)
+
+marker:                   # always on (idempotency); separate from the opt-in journal
+  backend: file
+  path: nucleon-state/processed.jsonl
+
 journal:
   enabled: false
   backend: file
