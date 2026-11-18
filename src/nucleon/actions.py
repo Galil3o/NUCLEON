@@ -15,6 +15,12 @@ from nucleon.mailstore import MailStore
 from nucleon.models import Action, ApplyLabel, DeleteToTrash, DraftRef, MessageRef, StageDraft
 
 
+class DraftLocationUnresolved(Exception):
+    """The APPEND succeeded but the draft could not be located unambiguously
+    (no APPENDUID, and the Message-ID SEARCH found none or several). No follow-up
+    operation is applied to it; the unconfirmed reference stays in the marker."""
+
+
 def draft_message_id(processing_key: str) -> str:
     """Deterministic Message-ID of the draft staged for a source message (R-004).
 
@@ -109,17 +115,28 @@ def execute(
         if on_draft_intent is not None:
             on_draft_intent(DraftRef(target=action.target, message_id_hash=mhash))
         ref = store.append_draft(action.target, msg.as_bytes())
+
+        def _dref(r: MessageRef, confirmed: bool) -> DraftRef:
+            return DraftRef(target=action.target, message_id_hash=mhash, confirmed=confirmed,
+                            mailbox=r.mailbox, uidvalidity=r.uidvalidity, uid=r.uid)
+
+        located = ref.uidvalidity > 0 and ref.uid > 0
         if on_draft_appended is not None:
-            on_draft_appended(
-                DraftRef(
-                    target=action.target,
-                    message_id_hash=mhash,
-                    confirmed=ref.uidvalidity > 0 and ref.uid > 0,
-                    mailbox=ref.mailbox,
-                    uidvalidity=ref.uidvalidity,
-                    uid=ref.uid,
+            on_draft_appended(_dref(ref, located))
+        if not located:
+            # R-010: APPEND succeeded but the server reported no APPENDUID. A ref
+            # with uid 0 is NOT a valid reference: look the draft up by its
+            # deterministic Message-ID, and only continue on a unique hit.
+            found = [r for r in store.find_draft(action.target, mid)
+                     if r.uidvalidity > 0 and r.uid > 0]
+            if len(found) != 1:
+                raise DraftLocationUnresolved(
+                    f"draft appended to {action.target!r} but {len(found)} match(es) "
+                    "found by Message-ID; not labelling"
                 )
-            )
+            ref = found[0]
+            if on_draft_appended is not None:
+                on_draft_appended(_dref(ref, True))
         if action.label is not None:
             store.set_label(ref, action.label)
         return ref

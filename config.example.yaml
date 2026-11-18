@@ -23,6 +23,7 @@ classifier:
 draft:
   target: outbox            # "outbox" or "drafts"
   label: nucleon/proposed
+  create_missing_folders: false   # preflight (R-010) blocks on a missing folder; true = create it
 
 cleanup:
   auto_trash_enabled: false

@@ -15,6 +15,31 @@ class StaleReferenceError(Exception):
     """
 
 
+class PreflightError(Exception):
+    """The mailbox cannot safely be written to (R-010); nothing was written."""
+
+
+@dataclass(frozen=True)
+class PreflightRequest:
+    """What the first write needs. Metadata only (folder names, switches)."""
+
+    draft_targets: tuple[str, ...] = ()  # "drafts" / "outbox" (provider-mapped by the store)
+    folders: tuple[str, ...] = ()  # label/target folders that must exist
+    need_move: bool = False  # Trash moves planned: needs the MOVE capability
+    create_missing: bool = False  # operator opt-in: create missing, non-system folders
+
+
+@dataclass(frozen=True)
+class PreflightReport:
+    problems: tuple[str, ...] = ()  # block the write run
+    warnings: tuple[str, ...] = ()  # degraded but safe (e.g. no UIDPLUS)
+    created: tuple[str, ...] = ()  # folders created (only with create_missing)
+
+    @property
+    def ok(self) -> bool:
+        return not self.problems
+
+
 @dataclass(frozen=True)
 class BodyFetch:
     """Result of a budgeted body fetch (R-011)."""
@@ -47,6 +72,12 @@ class MailStore(Protocol):
         """Budgeted body fetch (R-011): checks size/structure BEFORE loading,
         loads only the needed text part with a byte limit, raises
         ``BudgetExceeded`` for an over-size message, flags truncation."""
+        ...
+
+    def preflight(self, req: PreflightRequest) -> PreflightReport:
+        """Check folders, namespace and required capabilities BEFORE the first
+        write (R-010). Read-only unless ``req.create_missing`` is set; fails
+        closed (raises) if the server cannot answer."""
         ...
 
     def find_draft(self, target: str, message_id: str) -> list[MessageRef]:

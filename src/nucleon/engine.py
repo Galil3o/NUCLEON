@@ -19,7 +19,7 @@ from nucleon import gate
 from nucleon.config import Config
 from nucleon.journal import Journal
 from nucleon.marker import ProcessingMarker
-from nucleon.mailstore import MailStore, StaleReferenceError
+from nucleon.mailstore import MailStore, PreflightError, PreflightRequest, StaleReferenceError
 from nucleon.models import ApplyLabel, DeleteToTrash, DraftRef, JournalEntry, StageDraft
 from nucleon.quarantine import Classifier
 from nucleon.recipients import ContactBook
@@ -72,6 +72,8 @@ def run_once(
     # mail. Oldest-first iteration makes progress strictly monotonic.
     limit = cfg.mail.limit
     attempted = 0
+    checked_folders: set[str] = set()  # R-010: preflight state for this run
+    checked = {"draft": False, "move": False}
     for ref in store.iter_window(cfg.mail.mailbox, cfg.mail.since_days):
         pkey = ref.processing_key()
         if marker.is_done(pkey) or journal.has_processed(ref.key()):
@@ -112,6 +114,9 @@ def run_once(
             n_labeled = 0
             draft: list[DraftRef] = []  # latest stable draft reference (R-004)
             if acts:
+                # R-010: folders / namespace / capabilities are verified before
+                # the FIRST write of each kind; a failure aborts the whole run.
+                _preflight(store, cfg, acts, checked, checked_folders)
                 # Durable BEFORE the first mailbox write: a crash mid-action
                 # then cannot cause a duplicate draft/label on the next run.
                 marker.mark(pkey, "started")
@@ -144,6 +149,8 @@ def run_once(
             action = "drafted" if did_draft else "trashed" if did_trash else "classified"
             marker.mark(pkey, "ok", tuple(steps))
             _record(journal, ref, action, "ok", draft[0] if draft else None)
+        except PreflightError:
+            raise  # run-level: nothing was written, the message stays retryable
         except StaleReferenceError:
             # R-002: UIDVALIDITY changed; the UID may now be a different
             # message. Treat as vanished: no further action, nothing recorded.
@@ -170,6 +177,33 @@ def run_once(
         processed += 1
     return RunReport(processed, skipped, labeled, drafted, trashed, errors, vanished,
                      over_budget, tuple(events))
+
+
+def _preflight(store, cfg, acts, checked: dict, checked_folders: set) -> None:
+    wants_draft = any(isinstance(a, StageDraft) for a in acts)
+    wants_move = any(isinstance(a, DeleteToTrash) for a in acts)
+    folders: list[str] = []
+    for a in acts:
+        name = a.label if isinstance(a, (ApplyLabel, StageDraft)) else None
+        if name and name not in checked_folders and name not in folders:
+            folders.append(name)
+    need_draft = wants_draft and not checked["draft"]
+    need_move = wants_move and not checked["move"]
+    if not (need_draft or need_move or folders):
+        return
+    report = store.preflight(PreflightRequest(
+        draft_targets=(cfg.draft.target,) if need_draft else (),
+        folders=tuple(folders),
+        need_move=need_move,
+        create_missing=cfg.draft.create_missing_folders,
+    ))
+    for w in report.warnings:
+        _log.warning("preflight: %s", w)
+    if not report.ok:
+        raise PreflightError("preflight failed: " + "; ".join(report.problems))
+    checked["draft"] = checked["draft"] or wants_draft
+    checked["move"] = checked["move"] or wants_move
+    checked_folders.update(folders)
 
 
 def _stage2(analysis, cfg, stage, exc, t0, ref, steps) -> None:

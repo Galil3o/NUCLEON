@@ -23,7 +23,7 @@ from nucleon.budgets import (
     DEFAULT_MAX_MESSAGE_BYTES,
     BudgetExceeded,
 )
-from nucleon.mailstore import BodyFetch, StaleReferenceError
+from nucleon.mailstore import BodyFetch, PreflightReport, PreflightRequest, StaleReferenceError
 from nucleon.models import MessageMeta, MessageRef
 
 # LIST attributes (RFC 3501 / RFC 6154 SPECIAL-USE) that mark a folder as
@@ -33,6 +33,9 @@ _SYSTEM_FLAGS = frozenset({
     "\\junk", "\\archive", "\\flagged", "\\important",
 })
 _LIST_RE = re.compile(rb'^\((?P<flags>[^)]*)\)\s+(?:"(?:[^"\\]|\\.)*"|NIL)\s+(?P<name>.+)$')
+
+_NS_RE = re.compile(rb'^\(\(\s*"((?:[^"\\]|\\.)*)"\s+(?:"((?:[^"\\]|\\.)*)"|NIL)')
+_LIST_DELIM_RE = re.compile(rb'^\((?:[^)]*)\)\s+(?:"((?:[^"\\]|\\.)*)"|NIL)\s')
 
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -264,6 +267,92 @@ class ImapMailStore:
         return MessageRef.from_source(
             self._account, mailbox, uidvalidity, uid, str(mid).strip() if mid else None, raw
         )
+
+    # -- preflight (R-010) -------------------------------------------------
+    def _capabilities(self) -> frozenset[str]:
+        data = _check(self._conn.capability(), "CAPABILITY")
+        text = b" ".join(d for d in data if isinstance(d, bytes)).decode("ascii", "replace")
+        return frozenset(t.upper() for t in text.split())
+
+    def _namespace(self, caps: frozenset[str]) -> tuple[str, str | None]:
+        """(personal prefix, hierarchy delimiter). NAMESPACE if offered, else the
+        delimiter from ``LIST "" ""``; an unparseable answer yields ("", None)."""
+        if "NAMESPACE" in caps:
+            data = _check(self._conn.namespace(), "NAMESPACE")
+            raw = next((d for d in data if isinstance(d, bytes)), b"")
+            m = _NS_RE.match(raw.strip())
+            if m:
+                return (m.group(1).decode("utf-8", "replace"),
+                        m.group(2).decode("utf-8", "replace") if m.group(2) is not None else None)
+            return "", None
+        for line in _check(self._conn.list('""', '""'), "LIST"):
+            m = _LIST_DELIM_RE.match(line.strip()) if isinstance(line, bytes) else None
+            if m and m.group(1) is not None:
+                return "", m.group(1).decode("utf-8", "replace")
+        return "", None
+
+    def _folder_names(self) -> set[str]:
+        names: set[str] = set()
+        for line in _check(self._conn.list(), "LIST"):
+            mt = _LIST_RE.match(line.strip()) if isinstance(line, bytes) else None
+            if not mt:
+                continue
+            name = mt["name"].decode("utf-8", "replace").strip()
+            if len(name) >= 2 and name[0] == name[-1] == '"':
+                name = name[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+            names.add(name)
+        return names
+
+    def preflight(self, req: PreflightRequest) -> PreflightReport:
+        """R-010: verify capabilities, namespace and target folders BEFORE the
+        first write. Read-only (CAPABILITY / NAMESPACE / LIST) unless the
+        operator opted into ``create_missing``; never creates system folders and
+        never guesses a name translation. Raises if the server cannot answer."""
+        problems: list[str] = []
+        warnings: list[str] = []
+        created: list[str] = []
+        caps = self._capabilities()
+        if "IMAP4REV1" not in caps:
+            problems.append("server does not advertise IMAP4rev1")
+        if req.need_move and "MOVE" not in caps:
+            problems.append("capability MOVE (RFC 6851) required for Trash moves is missing")
+        if "UIDPLUS" not in caps:
+            warnings.append("no UIDPLUS: APPENDUID unavailable; drafts are located by "
+                            "Message-ID SEARCH after APPEND")
+        prefix, delim = self._namespace(caps)
+        existing = {n.casefold() for n in self._folder_names()}
+        system = {self._trash, self._drafts, self._sent, "INBOX"}
+        wanted: list[str] = []
+        folders = {"drafts": self._drafts, "outbox": self._outbox}
+        for t in req.draft_targets:
+            if t not in folders:
+                problems.append(f"unknown draft target {t!r}")
+            else:
+                wanted.append(folders[t])
+        wanted.extend(req.folders)
+        if req.need_move:
+            wanted.append(self._trash)
+        for name in dict.fromkeys(wanted):
+            if name.casefold() in existing:
+                continue
+            if delim is not None and delim != "/" and "/" in name:
+                problems.append(
+                    f"folder {name!r} missing and its '/' does not match the server "
+                    f"hierarchy delimiter {delim!r}; not translating names")
+            elif prefix and not name.startswith(prefix):
+                problems.append(
+                    f"folder {name!r} missing and lies outside the personal namespace "
+                    f"{prefix!r}")
+            elif name in system or name.casefold() in {s.casefold() for s in system}:
+                problems.append(f"system folder {name!r} is missing; never created automatically")
+            elif req.create_missing:
+                _check(self._conn.create(name), f"CREATE {name}")
+                created.append(name)
+            else:
+                problems.append(
+                    f"folder {name!r} is missing (set draft.create_missing_folders to "
+                    "let Nucleon create it)")
+        return PreflightReport(tuple(problems), tuple(warnings), tuple(created))
 
     # -- MailStore ---------------------------------------------------------
     def list_window(self, mailbox: str, since_days: int, limit: int) -> list[MessageRef]:
