@@ -172,3 +172,57 @@ discipline; cadence on-request + nightly.
   the obsolete `review/independent` branch are deleted.
 - **Daily cleanup is mandatory:** at least once per day (part of the nightly run
   and on request), prune merged/obsolete branches so nothing is orphaned.
+
+---
+
+## `[2026-11-18]` Review-driven additions (R-001…R-015) — all accepted
+From the independent review. All findings accepted; built into the v0.2 run.
+- **Idempotency ≠ audit journal (R-003/R-004).** A **minimal, always-on, durable
+  processing marker** (per message: ref-key → processed, plus a stable draft
+  reference and completed sub-steps) is the foundation for idempotency and
+  partial-action status. The **opt-in audit journal is built on top of it**
+  (journal ⊇ marker: the marker is always part of the journal; the journal is
+  not part of the simpler marker). Idempotency works with the audit journal OFF;
+  recurring write-runs without an effective marker are blocked.
+- **Stable account ID (R-012):** each account config gets a stable internal ID;
+  duplicates rejected; state/contacts/creds/reconcile bound to it; a login/server
+  change forces an explicit "reuse state?" decision.
+- **Recipient boundary (R-009):** model-proposed recipients/forwards resolve
+  ONLY against account-bound, approved contacts; new addresses are
+  review-required; the warning line is generated from the ACTUAL final
+  recipients; per-account activation.
+- **Analysis Stage 2 (R-008):** fixed metadata schema only (error code, stage,
+  duration, pseudonymized refs); content only after the separate Stage-3
+  confirmation, deleted promptly.
+- **Model endpoint = privacy boundary (R-007):** local endpoint default; remote
+  endpoints separately enabled and **TLS-required**; CONCEPT threat model names
+  data transfer to the model and sending from the mailbox.
+- **Labels (R-001):** model labels restricted to approved, provider-resolved
+  target IDs or a reserved automation namespace; the adapter excludes
+  system/special folders via provider metadata.
+- **Size budgets (R-011):** check MIME size/structure before loading; fetch only
+  needed parts with a byte limit; bound HTTP response, model context, and
+  action/label counts; overruns visible per message.
+- **IMAP correctness:** UIDVALIDITY checked before every ref-based access
+  (R-002); window paged stably, the limit applied AFTER the marker filter
+  (R-005); folder/namespace/capability preflight + missing-APPENDUID handled as
+  its own case (R-010); reconcile uses a stable draft id with its own timestamp,
+  else status "observed reply" (R-006).
+- **CLI robustness:** YAML parse errors → config error exit 2 (R-015); exit
+  status reflects partial/total-failure runs (R-014).
+
+## `[2026-11-18]` Banner — final decision (supersedes earlier banner notes)
+- Anything that is **not a 1:1 direct reply to the sender** is its **own action**
+  (e.g. `StageForward`) and carries the banner.
+- The operator works in their own mail client (e.g. Proton Web → Drafts), where
+  Nucleon can render nothing. So the banner **must live in the email draft
+  itself** — there is no Nucleon-controlled surface there.
+- **Banner = ON by default, with a config switch to turn it OFF (opt-out, not
+  opt-in).** It is the draft's first block: ⚠ (yellow highlight) at START **and**
+  END, text in **red** (HTML, with a plain-text fallback that keeps ⚠ … ⚠),
+  including an explicit "— VOR DEM SENDEN LÖSCHEN / DELETE BEFORE SENDING —" line,
+  generated from the **actual final recipients** (R-009). Banner **language = the
+  operator's program language**.
+- A non-sendable **label** on the draft is a quiet backstop (useful once a GUI
+  exists). Residual leak risk (operator forgets to delete the block) is inherent
+  to a CLI + web-client workflow; the loud wrapper minimizes it.
