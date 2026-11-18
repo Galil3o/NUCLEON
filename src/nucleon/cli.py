@@ -15,6 +15,7 @@ from nucleon.analysis import AnalysisLog
 from nucleon.engine import reconcile, run_once
 from nucleon.journal import build_journal
 from nucleon.marker import build_marker
+from nucleon.recipients import ContactBook, FileLearnedStore
 
 Deps = Callable[[Config], tuple[Any, Any, Any]]
 
@@ -85,7 +86,12 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
         store, classifier, journal = deps(cfg)
         if args.command == "run":
             analysis = AnalysisLog(cfg.analysis.path) if cfg.analysis.enabled else None
-            r = run_once(store, classifier, journal, cfg, build_marker(cfg.marker), analysis)
+            # R-009: account-bound contacts; the learned store is read only when opted in.
+            book = ContactBook.from_config(
+                cfg, FileLearnedStore(cfg.recipients.learned_path)
+                if cfg.recipients.learned_enabled else None)
+            r = run_once(store, classifier, journal, cfg, build_marker(cfg.marker), analysis,
+                         contacts=book)
             print(f"processed={r.processed} skipped={r.skipped} labeled={r.labeled} "
                   f"drafted={r.drafted} trashed={r.trashed} errors={r.errors} "
                   f"vanished={r.vanished} over_budget={r.over_budget}")

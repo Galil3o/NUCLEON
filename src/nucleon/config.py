@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 import yaml
 from nucleon.accounts import ACCOUNT_ID_RE
+from nucleon.addresses import normalize_address
 from nucleon.budgets import (
     DEFAULT_MAX_ACTIONS,
     DEFAULT_MAX_BODY_BYTES,
@@ -177,6 +178,37 @@ class AnalysisConfig(BaseModel):
     verbose_ttl_seconds: int = Field(default=900, ge=1, le=3600)
 
 
+class RecipientsConfig(BaseModel):
+    """Reply recipients (DECISIONS section 4) and the address boundary (R-009).
+
+    Per account (this block lives in the account's config). ``sender-only`` is
+    the default; model proposals are only ever considered in ``model-decided``
+    and then ONLY resolve against ``contacts`` (plus opt-in learned addresses).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["sender-only", "sender-and-recipients", "model-decided"] = "sender-only"
+    contacts: list[str] = Field(default_factory=list)  # approved addresses of this account
+    own_addresses: list[str] = Field(default_factory=list)  # excluded from reply-all
+    learned_enabled: bool = False  # history-learned addresses: opt-in, OFF by default
+    learned_path: str = "nucleon-state/contacts-learned.jsonl"  # separate store
+    banner: bool = True  # opt-out switch for the differing-recipient banner
+    banner_language: Literal["de", "en"] = "de"  # the operator's program language
+
+    @field_validator("contacts", "own_addresses")
+    @classmethod
+    def _addresses(cls, v: list[str]) -> list[str]:
+        out: list[str] = []
+        for raw in v:
+            a = normalize_address(raw)
+            if a is None:
+                raise ValueError("recipients: not a single valid address")
+            if a not in out:
+                out.append(a)
+        return out
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -189,6 +221,7 @@ class Config(BaseModel):
     marker: MarkerConfig = Field(default_factory=MarkerConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    recipients: RecipientsConfig = Field(default_factory=RecipientsConfig)
     # R-012: where account id -> identity fingerprint (hashes only) is kept.
     registry_path: str = "nucleon-state/accounts.json"
 
