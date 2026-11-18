@@ -141,3 +141,34 @@ Recipient mode (config), **three stages**:
 > For any OPEN item not decided before the nightly run: implement the stated
 > **Proposal** behind a safe default/flag and record it as a reversible ruling
 > (reported next morning), rather than block.
+
+---
+
+## `[2026-11-18]` Owner decisions — LOCKED (supersede the OPEN proposals above)
+- **A. Address book:** opt-in, **OFF by default**, **separate store**; sources
+  (a) a config contact list **and** (b) opt-in, history-learned addresses.
+  CardDAV/Proton contacts later.
+- **B. Reply-language:** default **`auto`** (incoming email's language),
+  per-account overridable to a fixed language.
+- **C. GUI:** one **local app**, **one start command, no server setup**,
+  non-technical-friendly; edits `config.yaml` + shows status. Contract only in v0.2.
+- **D. Forwarding:** a **distinct `StageForward` action** (not folded into the
+  reply modes), **drafts-only**, with the differing-recipient **banner** as its
+  first line.
+- **E. Policies:** **global default + optional per-account overrides.**
+- **F. Analysis escalation `Stage 1 → 2 → 3`:** Stage 2 auto (when
+  `analysis_mode` on); **Stage 3 (verbose) requires a separate explicit
+  confirmation — never automatic.**
+
+## `[2026-11-18]` Review location — supersedes §8
+Review moves to a **separate private repo `Ping-Pong`**, isolated per project in a
+**`nucleon/`** folder (other projects get their own folders). The public
+`review/independent` branch approach is **dropped**. Reviewer = collaborator on
+the Ping-Pong repo; code stays public in `Galil3o/NUCLEON`; same untrusted-input
+discipline; cadence on-request + nightly.
+
+## `[2026-11-18]` Housekeeping
+- v0.1 **merged to `main`** and tagged **`v0.1.0`**; the v0.1 feature branches and
+  the obsolete `review/independent` branch are deleted.
+- **Daily cleanup is mandatory:** at least once per day (part of the nightly run
+  and on request), prune merged/obsolete branches so nothing is orphaned.
