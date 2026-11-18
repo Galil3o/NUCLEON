@@ -27,7 +27,7 @@ SECRET = "Subject: payroll-secret alice@example.com IMAP BAD [AUTHENTICATIONFAIL
 
 def _cfg(**extra) -> Config:
     return Config.model_validate({
-        "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+        "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u", "id": "acct-1"},
         "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
         **extra,
     })

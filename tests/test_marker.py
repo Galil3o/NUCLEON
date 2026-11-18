@@ -59,7 +59,7 @@ def test_corrupt_line_is_tolerated(tmp_path):
 def test_build_marker_is_always_on_with_default_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     cfg = Config.model_validate({
-        "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+        "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u", "id": "acct-1"},
         "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
     })
     assert cfg.journal.enabled is False  # journal off ...
@@ -72,7 +72,7 @@ def test_build_marker_is_always_on_with_default_config(tmp_path, monkeypatch):
 def test_marker_config_has_no_off_switch():
     with pytest.raises(ValueError):
         Config.model_validate({
-            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u", "id": "acct-1"},
             "classifier": {"endpoint": "e", "model": "m"},
             "marker": {"enabled": False},
         })

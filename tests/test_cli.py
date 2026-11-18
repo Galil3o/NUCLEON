@@ -7,14 +7,14 @@ from nucleon.models import Classification, MessageMeta, MessageRef
 from nucleon.quarantine.fake import FakeClassifier
 
 CONFIG = """\
-mail: {mode: imap, host: h, port: 993, username: u}
+mail: {mode: imap, host: h, port: 993, username: u, id: acct-1}
 classifier: {endpoint: "http://127.0.0.1:1", model: m}
 """
 
 
 def _config(tmp_path) -> str:
     p = tmp_path / "config.yaml"
-    p.write_text(CONFIG + f"marker: {{path: {tmp_path / 'marker.jsonl'}}}\n", encoding="utf-8")
+    p.write_text(CONFIG + f"registry_path: {tmp_path / 'acc.json'}\n" + f"marker: {{path: {tmp_path / 'marker.jsonl'}}}\n", encoding="utf-8")
     return str(p)
 
 
@@ -102,7 +102,8 @@ def test_r008_cli_wires_stage2_only_when_analysis_enabled(tmp_path):
 
     p = tmp_path / "config.yaml"
     apath = tmp_path / "analysis.jsonl"
-    p.write_text(CONFIG + f"marker: {{path: {tmp_path / 'm.jsonl'}}}\n"
+    p.write_text(CONFIG + f"registry_path: {tmp_path / 'acc.json'}\n"
+                 f"marker: {{path: {tmp_path / 'm.jsonl'}}}\n"
                  f"analysis: {{enabled: true, path: {apath}}}\n", encoding="utf-8")
     rc = cli.main(["run", "--config", str(p)],
                   deps=lambda cfg: (_seeded_store(), Boom(), NullJournal()))

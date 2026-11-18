@@ -13,6 +13,7 @@ import logging
 
 from nucleon.analysis import AnalysisLog, pseudonym
 from nucleon.budgets import BudgetEvent, BudgetExceeded, cap_actions
+from nucleon.accounts import account_hash_for
 from nucleon.actions import draft_message_id
 from nucleon import gate
 from nucleon.config import Config
@@ -252,7 +253,9 @@ def reconcile(store: MailStore, journal: Journal, cfg: Config) -> ReconcileRepor
     the conversation, so it is recorded as "observed reply" and the proposal
     stays open. Entries without a confirmed draft id can only ever be observed.
     """
-    pending = journal.drafted_unsent()
+    # R-012: only this account's drafts (bound to the stable id, not the login).
+    mine = account_hash_for(cfg)
+    pending = [e for e in journal.drafted_unsent() if e.account_hash == mine]
     by_draft = {e.draft_message_id_hash: e for e in pending
                 if e.draft_message_id_hash and e.draft_confirmed}
     by_source: dict[str, list] = {}
