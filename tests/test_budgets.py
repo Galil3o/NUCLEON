@@ -188,7 +188,7 @@ def test_fake_store_rejects_oversize_and_truncates_body():
 # --- Config -------------------------------------------------------------------
 def _cfg(**limits) -> Config:
     return Config.model_validate({
-        "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+        "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u", "id": "acct-1"},
         "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
         "limits": limits,
     })
@@ -370,8 +370,9 @@ def test_within_budget_run_reports_nothing_extra(tmp_path):
 
 def test_cli_prints_budget_summary(tmp_path, capsys):
     p = tmp_path / "config.yaml"
-    p.write_text('mail: {mode: imap, host: h, port: 993, username: u}\n'
+    p.write_text('mail: {mode: imap, host: h, port: 993, username: u, id: acct-1}\n'
                  'classifier: {endpoint: "http://127.0.0.1:1", model: m}\n'
+                 f"registry_path: {tmp_path / 'acc.json'}\n"
                  f"marker: {{path: {tmp_path / 'm.jsonl'}}}\nlimits: {{max_message_bytes: 100}}\n",
                  encoding="utf-8")
     store = FakeMailStore(max_message_bytes=100)

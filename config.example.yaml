@@ -1,5 +1,9 @@
 # Nucleon example configuration. Placeholder values only; copy and edit locally.
 mail:
+  id: my-account           # stable internal id (R-012): all state is bound to it, not the login.
+                          # Unique per account; never reuse. A host/login change under the same id
+                          # is refused until you set accept_identity_change: true for one run.
+  accept_identity_change: false
   mode: imap
   host: 127.0.0.1
   port: 1143
@@ -55,3 +59,5 @@ limits:                   # size/count budgets (R-011); overruns are reported pe
   max_model_input_chars: 32000      # body text sent to the model
   max_labels_per_message: 10
   max_actions_per_message: 20
+
+registry_path: nucleon-state/accounts.json   # account id -> identity fingerprint (hashes only)

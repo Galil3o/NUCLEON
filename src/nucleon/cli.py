@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import os
 import ssl
 import sys
@@ -10,6 +9,7 @@ from typing import Any, Callable
 
 from pydantic import ValidationError
 
+from nucleon.accounts import AccountIdentityChanged, AccountRegistry, account_hash_for
 from nucleon.config import Config, load_config
 from nucleon.analysis import AnalysisLog
 from nucleon.engine import reconcile, run_once
@@ -40,7 +40,7 @@ def build_default_deps(cfg: Config) -> tuple[Any, Any, Any]:
         conn = imaplib.IMAP4(cfg.mail.host, cfg.mail.port)
         conn.starttls(ssl_context=context)
     conn.login(cfg.mail.username, password)
-    account_hash = hashlib.sha256(cfg.mail.username.encode()).hexdigest()
+    account_hash = account_hash_for(cfg)  # R-012: bound to the stable id, not the login
     lim = cfg.limits
     store = ImapMailStore(
         conn, account_hash, max_message_bytes=lim.max_message_bytes,
@@ -75,6 +75,11 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
         return 2
     except (ValidationError, ValueError, OSError) as exc:
         print(f"nucleon: invalid config {args.config}: {exc}", file=sys.stderr)
+        return 2
+    try:
+        AccountRegistry(cfg.registry_path).check(cfg)
+    except AccountIdentityChanged as exc:
+        print(f"nucleon: {exc}", file=sys.stderr)
         return 2
     try:
         store, classifier, journal = deps(cfg)

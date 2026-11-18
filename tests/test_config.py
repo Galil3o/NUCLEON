@@ -23,7 +23,7 @@ def test_missing_required_field_raises():
 
 def test_unknown_key_raises():
     base = {
-        "mail": {"mode": "imap", "host": "h", "port": 1, "username": "u"},
+        "mail": {"mode": "imap", "host": "h", "port": 1, "username": "u", "id": "acct-1"},
         "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
     }
     Config.model_validate(base)
@@ -36,7 +36,7 @@ def test_unknown_key_raises():
 # --- R-007: the model endpoint is a privacy boundary -------------------------
 def _with_endpoint(endpoint, **extra):
     return Config.model_validate({
-        "mail": {"mode": "imap", "host": "h", "port": 1, "username": "u"},
+        "mail": {"mode": "imap", "host": "h", "port": 1, "username": "u", "id": "acct-1"},
         "classifier": {"endpoint": endpoint, "model": "m", **extra},
     })
 

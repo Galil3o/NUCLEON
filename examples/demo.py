@@ -64,7 +64,7 @@ def main() -> None:
     tmp = tempfile.mkdtemp(prefix="nucleon-demo-")
     journal_path = os.path.join(tmp, "journal.jsonl")
     cfg = Config.model_validate({
-        "mail": {"mode": "imap", "host": "bridge.invalid", "port": 1143,
+        "mail": {"id": "demo", "mode": "imap", "host": "bridge.invalid", "port": 1143,
                  "username": "me@example.com"},
         "classifier": {"endpoint": "http://127.0.0.1:1", "model": "demo"},
         "draft": {"target": "drafts", "label": "nucleon/proposed"},

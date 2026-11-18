@@ -1,5 +1,6 @@
 import hashlib
 
+from nucleon.accounts import account_hash
 from nucleon.config import Config
 from nucleon.engine import ReconcileReport, RunReport, diagnose_partial, reconcile, run_once
 from nucleon.marker import FileMarkerStore, ProcessingMarker
@@ -9,10 +10,13 @@ from nucleon.models import Classification, MessageMeta, MessageRef
 from nucleon.quarantine.fake import FakeClassifier
 
 
+ACCT = account_hash("acct-1")
+
+
 def _cfg(**cleanup) -> Config:
     return Config.model_validate(
         {
-            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u", "id": "acct-1"},
             "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
             "cleanup": cleanup,
         }
@@ -20,7 +24,7 @@ def _cfg(**cleanup) -> Config:
 
 
 def _meta(uid=1, mid="<in@x>", **kw) -> MessageMeta:
-    ref = MessageRef.from_source("a", "INBOX", 1, uid, mid, b"raw%d" % uid)
+    ref = MessageRef.from_source(ACCT, "INBOX", 1, uid, mid, b"raw%d" % uid)
     return MessageMeta(
         ref=ref, subject="Hello", from_addr="a@b.c", to_addrs=["d@e.f"],
         message_id=mid, **kw
@@ -97,7 +101,7 @@ def _drafted_setup(tmp_path):
 
 def test_reconcile_conversation_match_is_only_an_observed_reply(tmp_path):
     store, j = _drafted_setup(tmp_path)
-    sent_ref = MessageRef.from_source("a", "Sent", 1, 9, "<out@x>", b"s")
+    sent_ref = MessageRef.from_source(ACCT, "Sent", 1, 9, "<out@x>", b"s")
     store.seed_sent(
         MessageMeta(ref=sent_ref, subject="Re: Hello", from_addr="d@e.f",
                     to_addrs=["a@b.c"], in_reply_to="<in@x>")
@@ -110,13 +114,13 @@ def test_reconcile_conversation_match_is_only_an_observed_reply(tmp_path):
 
 def test_reconcile_no_match_marks_nothing(tmp_path):
     store, j = _drafted_setup(tmp_path)
-    sent_ref = MessageRef.from_source("a", "Sent", 1, 9, "<out@x>", b"s")
+    sent_ref = MessageRef.from_source(ACCT, "Sent", 1, 9, "<out@x>", b"s")
     store.seed_sent(
         MessageMeta(ref=sent_ref, subject="Re: Other", from_addr="d@e.f",
                     to_addrs=["a@b.c"], in_reply_to="<other@x>")
     )
     store.seed_sent(
-        MessageMeta(ref=MessageRef.from_source("a", "Sent", 1, 10, None, b"t"),
+        MessageMeta(ref=MessageRef.from_source(ACCT, "Sent", 1, 10, None, b"t"),
                     subject="s", from_addr="d@e.f", to_addrs=["a@b.c"])
     )
     assert reconcile(store, j, _cfg()) == ReconcileReport(0, 0)
@@ -287,7 +291,7 @@ def test_r003_new_uidvalidity_is_a_new_identity(tmp_path):
     clf = FakeClassifier(_cls())
     run_once(store, clf, NullJournal(), _cfg(), _marker(tmp_path))
     store2 = FakeMailStore()
-    ref = MessageRef.from_source("a", "INBOX", 2, 1, "<in@x>", b"raw1")
+    ref = MessageRef.from_source(ACCT, "INBOX", 2, 1, "<in@x>", b"raw1")
     store2.seed_inbox(MessageMeta(ref=ref, subject="s", from_addr="a@b.c", to_addrs=[],
                                   message_id="<in@x>"), "body")
     store2.set_uidvalidity("INBOX", 2)
@@ -469,7 +473,7 @@ def test_r004_journal_drafted_entry_carries_draft_reference(tmp_path):
 
 # -- R-006: exact draft identity -> "sent"; conversation only -> "observed reply"
 def _sent_meta(mid, irt=None, uid=9):
-    ref = MessageRef.from_source("a", "Sent", 1, uid, mid, b"s%d" % uid)
+    ref = MessageRef.from_source(ACCT, "Sent", 1, uid, mid, b"s%d" % uid)
     return MessageMeta(ref=ref, subject="Re: Hello", from_addr="d@e.f", to_addrs=["a@b.c"],
                        in_reply_to=irt, message_id=mid)
 
@@ -517,7 +521,7 @@ def test_r006_unconfirmed_draft_is_never_reported_as_sent(tmp_path):
     store, j = FakeMailStore(), _journal(tmp_path)
     m = _meta()
     j.record(JournalEntry(
-        ref_key=m.ref.key(), account_hash="a", mailbox="INBOX", uid=1,
+        ref_key=m.ref.key(), account_hash=ACCT, mailbox="INBOX", uid=1,
         message_id_hash=m.ref.message_id_hash, raw_hash="r", action="drafted", status="ok",
         ts=datetime(2020, 1, 1, tzinfo=timezone.utc),
         draft_message_id_hash=hashlib.sha256(_own_draft_mid().encode()).hexdigest(),
@@ -534,7 +538,7 @@ def test_r006_legacy_entry_without_draft_id_falls_back_to_observed(tmp_path):
     store, j = FakeMailStore(), _journal(tmp_path)
     m = _meta()
     j.record(JournalEntry(
-        ref_key=m.ref.key(), account_hash="a", mailbox="INBOX", uid=1,
+        ref_key=m.ref.key(), account_hash=ACCT, mailbox="INBOX", uid=1,
         message_id_hash=m.ref.message_id_hash, raw_hash="r", action="drafted", status="ok",
         ts=datetime(2020, 1, 1, tzinfo=timezone.utc),
     ))

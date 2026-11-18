@@ -6,6 +6,7 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
+from nucleon.accounts import ACCOUNT_ID_RE
 from nucleon.budgets import (
     DEFAULT_MAX_ACTIONS,
     DEFAULT_MAX_BODY_BYTES,
@@ -21,6 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 class MailConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    # R-012: stable internal account id. All state is bound to it, never to the
+    # login name. Changing it orphans the state; changing host/username under
+    # the same id needs ``accept_identity_change`` (an explicit decision).
+    id: str
+    accept_identity_change: bool = False
     mode: str
     host: str
     port: int
@@ -28,6 +34,17 @@ class MailConfig(BaseModel):
     mailbox: str = "INBOX"
     since_days: int = 7
     limit: int = 50
+
+
+    @field_validator("id")
+    @classmethod
+    def _id_shape(cls, v: str) -> str:
+        if not ACCOUNT_ID_RE.fullmatch(v):
+            raise ValueError(
+                "mail.id must be 1-64 chars of letters, digits, '.', '_' or '-' "
+                "and start with a letter or digit"
+            )
+        return v
 
 
 def _is_loopback_host(host: str) -> bool:
@@ -172,6 +189,8 @@ class Config(BaseModel):
     marker: MarkerConfig = Field(default_factory=MarkerConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    # R-012: where account id -> identity fingerprint (hashes only) is kept.
+    registry_path: str = "nucleon-state/accounts.json"
 
 
 def load_config(path: str) -> Config:

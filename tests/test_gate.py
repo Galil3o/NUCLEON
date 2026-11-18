@@ -16,7 +16,7 @@ def _cfg(labels=None, **cleanup) -> Config:
     return Config.model_validate(
         {
             **({"labels": labels} if labels else {}),
-            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u", "id": "acct-1"},
             "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
             "cleanup": cleanup,
         }
@@ -138,7 +138,7 @@ def test_max_length_label_allowed():
 def test_draft_label_is_trusted_config():
     cfg = Config.model_validate(
         {
-            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
+            "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u", "id": "acct-1"},
             "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
             "draft": {"label": "my:odd label!"},
         }
