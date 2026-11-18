@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from datetime import datetime, timezone
 from typing import Protocol
 
 from nucleon.config import JournalConfig
@@ -52,6 +53,8 @@ class Journal(Protocol):
 
     def mark_sent(self, ref_key: str) -> None: ...
 
+    def mark_observed(self, ref_key: str) -> bool: ...
+
     def drafted_unsent(self) -> list[JournalEntry]: ...
 
 
@@ -69,9 +72,31 @@ class StoredJournal:
         matches = [e for e in self._store.entries() if e.ref_key == ref_key]
         if not matches:
             return
+        # R-006: the reconcile has its own timestamp; never the draft's.
         self._store.append(
-            matches[-1].model_copy(update={"action": "marked_sent", "status": "sent"})
+            matches[-1].model_copy(
+                update={"action": "marked_sent", "status": "sent", "ts": datetime.now(timezone.utc)}
+            )
         )
+
+    def mark_observed(self, ref_key: str) -> bool:
+        """Record an "observed reply" (conversation evidence only, NOT "sent").
+
+        The draft stays open. Idempotent: returns False if nothing was added.
+        """
+        matches = [e for e in self._store.entries() if e.ref_key == ref_key]
+        if not matches or matches[-1].action in ("observed_reply", "marked_sent"):
+            return False
+        self._store.append(
+            matches[-1].model_copy(
+                update={
+                    "action": "observed_reply",
+                    "status": "observed_reply",
+                    "ts": datetime.now(timezone.utc),
+                }
+            )
+        )
+        return True
 
     def drafted_unsent(self) -> list[JournalEntry]:
         entries = self._store.entries()
@@ -88,6 +113,9 @@ class NullJournal:
 
     def mark_sent(self, ref_key: str) -> None:
         return None
+
+    def mark_observed(self, ref_key: str) -> bool:
+        return False
 
     def drafted_unsent(self) -> list[JournalEntry]:
         return []

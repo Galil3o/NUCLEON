@@ -50,7 +50,7 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     for name, help_ in (
         ("run", "process the mailbox window once"),
-        ("reconcile", "mark drafted entries as sent"),
+        ("reconcile", "match Sent against open drafts (sent / observed reply)"),
     ):
         p = sub.add_parser(name, help=help_)
         p.add_argument("--config", default="config.yaml", metavar="PATH",
@@ -76,7 +76,8 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
                   f"drafted={r.drafted} trashed={r.trashed} errors={r.errors} "
                   f"vanished={r.vanished}")
         else:
-            print(f"reconciled={reconcile(store, journal, cfg)}")
+            rep = reconcile(store, journal, cfg)
+            print(f"reconciled={rep.sent} observed={rep.observed}")
     except Exception as exc:  # handled error: short message, no traceback
         print(f"nucleon: error: {exc}", file=sys.stderr)
         return 1
