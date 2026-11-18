@@ -69,6 +69,15 @@ nucleon run --config config.yaml        # one pass: classify, label, stage draft
 nucleon reconcile --config config.yaml  # mark staged drafts that have been sent
 ```
 
+**Exit status** (for cron/schedulers):
+
+| Code | Meaning |
+|------|---------|
+| 0 | OK. All messages processed (a message that vanished mid-run is benign). |
+| 1 | Runtime error: adapter/server/preflight failure, no usable result. |
+| 2 | Configuration error: missing, invalid or unparseable config (YAML errors name line/column), or account-identity conflict. |
+| 3 | Run completed, but at least one message failed (`errors>0`) or was rejected by a size budget (`over_budget>0`). Successful actions are still all counted in the report line. |
+
 > v0.1 note: connecting to a real Proton Bridge still needs live setup (Bridge's
 > TLS certificate, draft/label behaviour) that is not yet verified — see Roadmap.
 > The engine is fully exercised by the test suite against fakes.

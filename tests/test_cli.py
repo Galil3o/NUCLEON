@@ -107,6 +107,69 @@ def test_r008_cli_wires_stage2_only_when_analysis_enabled(tmp_path):
                  f"analysis: {{enabled: true, path: {apath}}}\n", encoding="utf-8")
     rc = cli.main(["run", "--config", str(p)],
                   deps=lambda cfg: (_seeded_store(), Boom(), NullJournal()))
-    assert rc == 0
+    assert rc == cli.EXIT_RUN_FAILURES  # R-014: the one message errored
     text = apath.read_text()
     assert '"error_code":"value_error"' in text and "secret" not in text and "alice" not in text
+
+
+# -- R-014: exit status reflects failed runs ----------------------------------
+
+def _ok_clf():
+    return FakeClassifier(Classification(category="personal", labels=[], urgency="normal",
+                                         needs_reply=False))
+
+
+def test_r014_exit_codes_are_documented_constants():
+    assert (cli.EXIT_OK, cli.EXIT_ERROR, cli.EXIT_CONFIG, cli.EXIT_RUN_FAILURES) == (0, 1, 2, 3)
+
+
+def test_r014_zero_processed_one_error_is_not_exit_zero(tmp_path, capsys):
+    class Boom:
+        def classify(self, meta, body):
+            raise ValueError("x")
+
+    rc = cli.main(["run", "--config", _config(tmp_path)],
+                  deps=lambda cfg: (_seeded_store(), Boom(), NullJournal()))
+    assert rc == 3
+    assert "processed=0" in capsys.readouterr().out
+
+
+def test_r014_partial_failure_still_reports_successes(tmp_path, capsys):
+    store = _seeded_store()
+    ref2 = MessageRef.from_source("a", "INBOX", 1, 2, "<in2@x>", b"raw2")
+    store.seed_inbox(MessageMeta(ref=ref2, subject="Hi2", from_addr="a@b.c",
+                                 to_addrs=["d@e.f"], message_id="<in2@x>"), "body2")
+
+    class Flaky:
+        n = 0
+
+        def classify(self, meta, body):
+            Flaky.n += 1
+            if Flaky.n == 1:
+                raise ValueError("x")
+            return Classification(category="personal", labels=[], urgency="normal",
+                                  needs_reply=False)
+
+    rc = cli.main(["run", "--config", _config(tmp_path)],
+                  deps=lambda cfg: (store, Flaky(), NullJournal()))
+    out = capsys.readouterr().out
+    assert rc == 3 and "processed=1" in out and "errors=1" in out
+
+
+def test_r014_over_budget_is_a_failed_run(tmp_path, capsys):
+    from nucleon.budgets import BudgetExceeded
+
+    store = _seeded_store()
+
+    def too_big(ref):
+        raise BudgetExceeded("message_size", 1, 2)
+
+    store.fetch_body = too_big  # type: ignore[method-assign]
+    rc = cli.main(["run", "--config", _config(tmp_path)],
+                  deps=lambda cfg: (store, _ok_clf(), NullJournal()))
+    assert rc == 3 and "over_budget=1" in capsys.readouterr().out
+
+
+def test_r014_clean_run_and_vanished_only_are_exit_zero(tmp_path):
+    assert cli.main(["run", "--config", _config(tmp_path)],
+                    deps=lambda cfg: (_seeded_store(), _ok_clf(), NullJournal())) == 0
