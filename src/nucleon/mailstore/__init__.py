@@ -7,6 +7,10 @@ from nucleon.models import MessageMeta, MessageRef
 
 
 class MailStore(Protocol):
+    def system_folders(self) -> frozenset[str]:
+        """Provider-flagged system/special folders; never valid label targets."""
+        ...
+
     def list_window(self, mailbox: str, since_days: int, limit: int) -> list[MessageRef]: ...
 
     def fetch_meta(self, ref: MessageRef) -> MessageMeta: ...

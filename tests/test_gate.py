@@ -12,9 +12,10 @@ from nucleon.models import (
 ALLOWED = (ApplyLabel, StageDraft, DeleteToTrash)
 
 
-def _cfg(**cleanup) -> Config:
+def _cfg(labels=None, **cleanup) -> Config:
     return Config.model_validate(
         {
+            **({"labels": labels} if labels else {}),
             "mail": {"mode": "imap", "host": "h", "port": 993, "username": "u"},
             "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
             "cleanup": cleanup,
@@ -31,7 +32,7 @@ def _meta(**kw) -> MessageMeta:
 
 def _cls(**kw) -> Classification:
     base = dict(
-        category="personal", labels=["l1", "l2"], urgency="normal", needs_reply=False
+        category="personal", labels=["nucleon/l1", "nucleon/l2"], urgency="normal", needs_reply=False
     )
     base.update(kw)
     return Classification(**base)
@@ -42,7 +43,7 @@ def test_labels_and_draft_emitted_when_reply_needed():
     c = _cls(needs_reply=True, draft_body="Thanks", draft_subject="Re: Hi")
     acts = decide(c, meta, _cfg())
     labels = [a.label for a in acts if isinstance(a, ApplyLabel)]
-    assert labels == ["l1", "l2"]
+    assert labels == ["nucleon/l1", "nucleon/l2"]
     drafts = [a for a in acts if isinstance(a, StageDraft)]
     assert len(drafts) == 1
     d = drafts[0]
@@ -102,7 +103,7 @@ def test_injection_text_in_fields_changes_nothing():
         draft_body=evil,
     )
     acts = decide(c, _meta(message_id="<in@x>"), _cfg())
-    assert [type(a) for a in acts] == [ApplyLabel, StageDraft]
+    assert [type(a) for a in acts] == [StageDraft]  # evil label is not in the namespace
     # even with cleanup on for other categories, the evil category isn't listed
     cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
     assert not any(isinstance(a, DeleteToTrash) for a in decide(c, _meta(), cfg))
@@ -123,14 +124,15 @@ import pytest
     ["a\r\nb", "a\x00b", "a\x7fb", "a b\tc", "x; DELETE", "", "a" * 65, 'q"r', "é"],
 )
 def test_invalid_labels_are_dropped(bad):
-    out = decide(_cls(labels=[bad, "ok/label 1.x_y-z"]), _meta(), _cfg())
+    out = decide(_cls(labels=[bad, "nucleon/ok/label 1.x_y-z"]), _meta(), _cfg())
     labels = [a.label for a in out if isinstance(a, ApplyLabel)]
-    assert labels == ["ok/label 1.x_y-z"]
+    assert labels == ["nucleon/ok/label 1.x_y-z"]
 
 
 def test_max_length_label_allowed():
-    out = decide(_cls(labels=["a" * 64]), _meta(), _cfg())
-    assert [a.label for a in out if isinstance(a, ApplyLabel)] == ["a" * 64]
+    label = "nucleon/" + "a" * 56
+    out = decide(_cls(labels=[label]), _meta(), _cfg())
+    assert [a.label for a in out if isinstance(a, ApplyLabel)] == [label]
 
 
 def test_draft_label_is_trusted_config():
@@ -144,3 +146,55 @@ def test_draft_label_is_trusted_config():
     out = decide(_cls(needs_reply=True, draft_body="hi", labels=[]), _meta(), cfg)
     drafts = [a for a in out if isinstance(a, StageDraft)]
     assert drafts and drafts[0].label == "my:odd label!"
+
+
+def _labels(out):
+    return [a.label for a in out if isinstance(a, ApplyLabel)]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["Trash", "trash", "INBOX", "Inbox", "Sent", "Sent Items", "Drafts", "Junk", "Spam",
+     "Archive", "All Mail", "Starred", "Flagged", "Deleted Items", "Bin",
+     "plain-label", "Work", "nucleon/", "nucleon", "other/nucleon/x",
+     "nucleon/../Trash", "nucleon//x", "/nucleon/x", "nucleon/./x"],
+)
+def test_r001_labels_outside_namespace_or_allowlist_are_dropped(bad):
+    assert _labels(decide(_cls(labels=[bad]), _meta(), _cfg())) == []
+
+
+def test_r001_namespace_label_passes():
+    assert _labels(decide(_cls(labels=["nucleon/invoice"]), _meta(), _cfg())) == [
+        "nucleon/invoice"
+    ]
+
+
+def test_r001_allowlisted_target_passes_but_only_exact():
+    cfg = _cfg(labels={"allowed": ["Labels/Work"]})
+    out = decide(_cls(labels=["Labels/Work", "Labels/Work2", "labels/work"]), _meta(), cfg)
+    assert _labels(out) == ["Labels/Work"]
+
+
+@pytest.mark.parametrize("name", ["Trash", "trash", "INBOX", "Sent Items", "Archive"])
+def test_r001_system_name_rejected_even_if_allowlisted(name):
+    cfg = _cfg(labels={"allowed": [name]})
+    assert _labels(decide(_cls(labels=[name]), _meta(), cfg)) == []
+
+
+def test_r001_provider_reported_system_folder_rejected_even_if_allowlisted():
+    cfg = _cfg(labels={"allowed": ["Labels/Weird"], "namespace": "nucleon/"})
+    out = decide(_cls(labels=["Labels/Weird", "nucleon/ok"]), _meta(), cfg,
+                 system_folders={"labels/weird"})
+    assert _labels(out) == ["nucleon/ok"]
+
+
+def test_r001_provider_system_folder_inside_namespace_rejected():
+    out = decide(_cls(labels=["nucleon/x"]), _meta(), _cfg(), system_folders={"Nucleon/X"})
+    assert _labels(out) == []
+
+
+def test_r001_invalid_namespace_config_rejected():
+    with pytest.raises(ValueError):
+        _cfg(labels={"namespace": "nucleon"})
+    with pytest.raises(ValueError):
+        _cfg(labels={"namespace": "/"})

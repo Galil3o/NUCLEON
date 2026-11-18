@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MailConfig(BaseModel):
@@ -48,6 +48,27 @@ class JournalConfig(BaseModel):
     path: str | None = None
 
 
+class LabelsConfig(BaseModel):
+    """R-001: where model-proposed labels may point.
+
+    A model label is only honoured inside the reserved automation ``namespace``
+    or when it exactly matches an operator-approved, provider-resolved target
+    in ``allowed``. System/special folders are never valid targets.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    namespace: str = "nucleon/"
+    allowed: list[str] = Field(default_factory=list)
+
+    @field_validator("namespace")
+    @classmethod
+    def _namespace_shape(cls, v: str) -> str:
+        if len(v) < 2 or not v.endswith("/") or v.startswith("/") or ".." in v:
+            raise ValueError("labels.namespace must look like 'name/' (non-empty, trailing slash)")
+        return v
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,6 +77,7 @@ class Config(BaseModel):
     draft: DraftConfig = Field(default_factory=DraftConfig)
     cleanup: CleanupConfig = Field(default_factory=CleanupConfig)
     journal: JournalConfig = Field(default_factory=JournalConfig)
+    labels: LabelsConfig = Field(default_factory=LabelsConfig)
 
 
 def load_config(path: str) -> Config:

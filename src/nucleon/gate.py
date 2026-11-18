@@ -7,6 +7,7 @@ types in ``Action`` exist (no send, no permanent delete).
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 from nucleon.config import Config
 from nucleon.models import (
@@ -31,10 +32,41 @@ def _is_valid_label(label: str) -> bool:
     return _LABEL_RE.fullmatch(label) is not None
 
 
-def decide(classification: Classification, meta: MessageMeta, cfg: Config) -> list[Action]:
+# Well-known system/special folder names and aliases (casefolded). Provider
+# metadata (``system_folders``) is the authority; this is a static backstop.
+_SYSTEM_NAMES = frozenset({
+    "inbox", "trash", "bin", "deleted", "deleted items", "deleted messages",
+    "sent", "sent items", "sent mail", "sent messages", "drafts", "draft",
+    "junk", "junk e-mail", "junk email", "spam", "archive", "archives",
+    "all mail", "all", "starred", "flagged", "important", "outbox",
+})
+
+
+def _label_allowed(label: str, cfg: Config, system: frozenset[str]) -> bool:
+    """R-001: namespace or approved target, never a system/special folder."""
+    if not _is_valid_label(label):
+        return False
+    segments = label.split("/")
+    if any(s in ("", ".", "..") for s in segments):
+        return False
+    folded = label.casefold()
+    if folded in system or folded in _SYSTEM_NAMES:
+        return False
+    ns = cfg.labels.namespace
+    in_namespace = label.startswith(ns) and len(label) > len(ns)
+    return in_namespace or label in cfg.labels.allowed
+
+
+def decide(
+    classification: Classification,
+    meta: MessageMeta,
+    cfg: Config,
+    system_folders: Iterable[str] = (),
+) -> list[Action]:
+    system = frozenset(f.casefold() for f in system_folders)
     actions: list[Action] = [ApplyLabel(ref=meta.ref, label=l)
         for l in classification.labels
-        if _is_valid_label(l)
+        if _label_allowed(l, cfg, system)
     ]
 
     if classification.needs_reply and classification.draft_body:
