@@ -33,6 +33,7 @@ read-only IMAP fetch → quarantined classifier → deterministic gate → actio
   as **native drafts** for you to review and send from your own client (Proton
   web / mobile / Outlook via Bridge). Cleanup is an **opt-in, off-by-default**
   move to **Trash** (reversible) — never a permanent delete.
+- An **always-on processing marker** (metadata/hashes only, separate from the journal) keeps repeated runs idempotent even with the journal off.
 - An **opt-in mail journal** records metadata and hashes only (never message
   bodies, subjects, or addresses) for auditability, reconciliation, and
   idempotency.
