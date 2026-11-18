@@ -16,6 +16,14 @@ from typing import Any, Optional
 
 from nucleon.models import MessageMeta, MessageRef
 
+# LIST attributes (RFC 3501 / RFC 6154 SPECIAL-USE) that mark a folder as
+# non-label: unselectable containers and system/special-use folders.
+_SYSTEM_FLAGS = frozenset({
+    "\\noselect", "\\nonexistent", "\\all", "\\trash", "\\sent", "\\drafts",
+    "\\junk", "\\archive", "\\flagged", "\\important",
+})
+_LIST_RE = re.compile(rb'^\((?P<flags>[^)]*)\)\s+(?:"(?:[^"\\]|\\.)*"|NIL)\s+(?P<name>.+)$')
+
 _MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -48,8 +56,30 @@ class ImapMailStore:
         self._drafts = drafts
         self._outbox = outbox
         self._sent = sent
+        self._system: Optional[frozenset[str]] = None
 
     # -- helpers -----------------------------------------------------------
+    def system_folders(self) -> frozenset[str]:
+        """Folders the provider flags as system/special (LIST attributes), plus
+        the configured Trash/Drafts/Sent/Outbox and INBOX. Fails closed: if LIST
+        fails, this raises and no label write proceeds. Cached per connection."""
+        if self._system is None:
+            names = {"INBOX", self._trash, self._drafts, self._sent, self._outbox}
+            for line in _check(self._conn.list(), "LIST"):
+                if not isinstance(line, bytes):
+                    continue
+                mt = _LIST_RE.match(line.strip())
+                if not mt:
+                    continue
+                flags = {f.lower() for f in mt["flags"].decode("ascii", "replace").split()}
+                if flags & _SYSTEM_FLAGS:
+                    name = mt["name"].decode("utf-8", "replace").strip()
+                    if len(name) >= 2 and name[0] == name[-1] == '"':
+                        name = name[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+                    names.add(name)
+            self._system = frozenset(names)
+        return self._system
+
     def _select(self, mailbox: str) -> int:
         _check(self._conn.select(mailbox), f"SELECT {mailbox}")
         try:
@@ -159,6 +189,8 @@ class ImapMailStore:
         Proton Bridge exposes labels as folders; the exact label mechanism
         needs live verification against a real Bridge.
         """
+        if label.casefold() in {n.casefold() for n in self.system_folders()}:
+            raise ValueError("label resolves to a system/special folder")
         self._select(ref.mailbox)
         _check(self._conn.uid("COPY", str(ref.uid), label), "COPY")
 

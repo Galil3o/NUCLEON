@@ -33,6 +33,25 @@ class FakeConn:
             return "OK", [(b"1 (UID %s BODY[] {%d}" % (args[0].encode(), len(data)), data), b")"]
         return "OK", [b""]
 
+    LIST = [
+        b'(\\HasNoChildren) "/" "INBOX"',
+        b'(\\HasNoChildren \\Trash) "/" "Papierkorb"',
+        b'(\\HasNoChildren \\Sent) "/" "Gesendet"',
+        b'(\\HasNoChildren \\Drafts) "/" "Entwuerfe"',
+        b'(\\HasNoChildren \\Junk) "/" "Spam"',
+        b'(\\HasNoChildren \\Archive) "/" "Archiv"',
+        b'(\\HasNoChildren \\All) "/" "Alle"',
+        b'(\\HasNoChildren \\Flagged) "/" "Markiert"',
+        b'(\\Noselect \\HasChildren) "/" "Container"',
+        b'(\\HasNoChildren) "/" "Labels/Work"',
+        b'(\\HasNoChildren) "/" "nucleon/proposed"',
+    ]
+    list_status = "OK"
+
+    def list(self, directory='""', pattern="*"):
+        self.cmds.append(("LIST", directory, pattern))
+        return self.list_status, self.LIST
+
     def append(self, mailbox, flags, date_time, message):
         self.cmds.append(("APPEND", mailbox, flags, date_time, message))
         return "OK", [b"[APPENDUID 77 42] done"]
@@ -141,3 +160,29 @@ def test_set_label_copies_to_label_folder(store, conn):
     store.set_label(ref, "Labels/Work")
     assert ("UID", "COPY", str(ref.uid), "Labels/Work") in conn.cmds
     assert not any(c[:2] == ("UID", "STORE") for c in conn.cmds)
+
+
+# -- R-001: system/special folders are excluded via provider metadata ---------
+def test_system_folders_from_list_flags(store):
+    sf = {n.casefold() for n in store.system_folders()}
+    for name in ("papierkorb", "gesendet", "entwuerfe", "spam", "archiv", "alle",
+                 "markiert", "container", "inbox", "trash", "drafts", "sent"):
+        assert name in sf
+    assert "labels/work" not in sf and "nucleon/proposed" not in sf
+
+
+def test_set_label_refuses_system_folder(store, conn):
+    ref = _ref(store)
+    conn.cmds.clear()
+    for bad in ("Papierkorb", "papierkorb", "Archiv", "Trash", "INBOX"):
+        with pytest.raises(ValueError):
+            store.set_label(ref, bad)
+    assert not any(c[:2] == ("UID", "COPY") for c in conn.cmds)
+
+
+def test_set_label_fails_closed_when_list_fails(store, conn):
+    conn.list_status = "NO"
+    ref = _ref(store)
+    with pytest.raises(RuntimeError):
+        store.set_label(ref, "Labels/Work")
+    assert not any(c[:2] == ("UID", "COPY") for c in conn.cmds)

@@ -42,7 +42,7 @@ def run_once(
             meta = store.fetch_meta(ref)
             body = store.fetch_body_text(ref)
             classification = classifier.classify(meta, body)
-            acts = gate.decide(classification, meta, cfg)
+            acts = gate.decide(classification, meta, cfg, store.system_folders())
             did_draft = did_trash = False
             n_labeled = 0
             for a in acts:

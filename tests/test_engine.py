@@ -27,7 +27,7 @@ def _meta(uid=1, mid="<in@x>", **kw) -> MessageMeta:
 
 
 def _cls(**kw) -> Classification:
-    base = dict(category="personal", labels=["l1"], urgency="normal", needs_reply=False)
+    base = dict(category="personal", labels=["nucleon/l1"], urgency="normal", needs_reply=False)
     base.update(kw)
     return Classification(**base)
 
@@ -39,11 +39,11 @@ def _journal(tmp_path) -> StoredJournal:
 def test_run_once_labels_and_stages_one_draft(tmp_path):
     store, j = FakeMailStore(), _journal(tmp_path)
     store.seed_inbox(_meta(), "body")
-    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks", labels=["l1", "l2"]))
+    clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks", labels=["nucleon/l1", "nucleon/l2"]))
     report = run_once(store, clf, j, _cfg())
     assert report == RunReport(processed=1, skipped=0, labeled=2, drafted=1, trashed=0)
     assert len(store.appended_drafts) == 1
-    assert [l for _, l in store.labels if l in ("l1", "l2")] == ["l1", "l2"]
+    assert [l for _, l in store.labels if l in ("nucleon/l1", "nucleon/l2")] == ["nucleon/l1", "nucleon/l2"]
     entries = j._store.entries()
     assert len(entries) == 1 and entries[0].action == "drafted"
 
@@ -180,3 +180,14 @@ def test_mid_action_failure_records_error_not_duplicate_draft(tmp_path):
     r1 = run_once(store, clf, j, _cfg())
     r2 = run_once(store, clf, j, _cfg())
     assert r1.errors == 1 and r2.skipped == 1 and calls["n"] == 1
+
+
+def test_r001_engine_drops_labels_on_provider_system_folders(tmp_path):
+    store, j = FakeMailStore(), _journal(tmp_path)
+    store.system_folder_names = frozenset({"Labels/Hidden"})
+    store.seed_inbox(_meta(), "body")
+    cfg = _cfg()
+    cfg = cfg.model_copy(update={"labels": cfg.labels.model_copy(update={"allowed": ["Labels/Hidden"]})})
+    clf = FakeClassifier(_cls(labels=["Labels/Hidden", "nucleon/ok", "Trash"]))
+    run_once(store, clf, j, cfg)
+    assert [l for _, l in store.labels] == ["nucleon/ok"]

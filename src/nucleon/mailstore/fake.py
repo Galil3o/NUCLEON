@@ -13,6 +13,10 @@ class FakeMailStore:
         self.labels: list[tuple[MessageRef, str]] = []
         self.moved_to_trash: list[MessageRef] = []
         self.seen: set[str] = set()
+        self.system_folder_names: frozenset[str] = frozenset()
+
+    def system_folders(self) -> frozenset[str]:
+        return self.system_folder_names
 
     def seed_inbox(self, meta: MessageMeta, body: str) -> None:
         self._inbox.append(meta)
