@@ -46,3 +46,12 @@ analysis:                 # error analysis (DECISIONS section 5); off by default
                           # per-message confirmation, never automatic; purged after the ttl
   verbose_path: nucleon-state/analysis-stage3.jsonl
   verbose_ttl_seconds: 900
+
+limits:                   # size/count budgets (R-011); overruns are reported per message
+  max_message_bytes: 10000000       # RFC822.SIZE checked BEFORE loading; over = message rejected
+  max_body_bytes: 262144            # only the text part is fetched, up to this many bytes
+  max_header_bytes: 65536
+  max_model_response_bytes: 1048576 # HTTP response from the model endpoint
+  max_model_input_chars: 32000      # body text sent to the model
+  max_labels_per_message: 10
+  max_actions_per_message: 20

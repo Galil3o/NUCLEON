@@ -6,6 +6,15 @@ from typing import Literal
 from urllib.parse import urlsplit
 
 import yaml
+from nucleon.budgets import (
+    DEFAULT_MAX_ACTIONS,
+    DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_MAX_HEADER_BYTES,
+    DEFAULT_MAX_LABELS,
+    DEFAULT_MAX_MESSAGE_BYTES,
+    DEFAULT_MAX_MODEL_INPUT_CHARS,
+    DEFAULT_MAX_MODEL_RESPONSE_BYTES,
+)
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -124,6 +133,20 @@ class LabelsConfig(BaseModel):
         return v
 
 
+class LimitsConfig(BaseModel):
+    """Size/count budgets (R-011). Overruns are reported per message."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_message_bytes: int = Field(default=DEFAULT_MAX_MESSAGE_BYTES, gt=0)  # RFC822.SIZE; over = rejected
+    max_body_bytes: int = Field(default=DEFAULT_MAX_BODY_BYTES, gt=0)  # text part fetch cap; over = truncated
+    max_header_bytes: int = Field(default=DEFAULT_MAX_HEADER_BYTES, gt=0)
+    max_model_response_bytes: int = Field(default=DEFAULT_MAX_MODEL_RESPONSE_BYTES, gt=0)
+    max_model_input_chars: int = Field(default=DEFAULT_MAX_MODEL_INPUT_CHARS, gt=0)  # body sent to model
+    max_labels_per_message: int = Field(default=DEFAULT_MAX_LABELS, gt=0)
+    max_actions_per_message: int = Field(default=DEFAULT_MAX_ACTIONS, gt=0)
+
+
 class AnalysisConfig(BaseModel):
     """Error analysis (R-008). Stage 2 = metadata-only records; Stage 3 = content,
     needs ``verbose`` plus a separate explicit per-message confirmation."""
@@ -148,6 +171,7 @@ class Config(BaseModel):
     labels: LabelsConfig = Field(default_factory=LabelsConfig)
     marker: MarkerConfig = Field(default_factory=MarkerConfig)
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
+    limits: LimitsConfig = Field(default_factory=LimitsConfig)
 
 
 def load_config(path: str) -> Config:

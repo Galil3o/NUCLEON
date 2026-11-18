@@ -1,6 +1,7 @@
 """MailStore interface. Read-only except draft/label/trash; there is no send method."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Iterator, Protocol
 
 from nucleon.models import MessageMeta, MessageRef
@@ -12,6 +13,16 @@ class StaleReferenceError(Exception):
     The referenced UID may now denote a different message; treat the message
     as vanished and take no action on it.
     """
+
+
+@dataclass(frozen=True)
+class BodyFetch:
+    """Result of a budgeted body fetch (R-011)."""
+
+    text: str
+    truncated: bool = False
+    # Size in bytes of the text part as the server reported it (None if unknown).
+    original_bytes: int | None = None
 
 
 class MailStore(Protocol):
@@ -30,6 +41,12 @@ class MailStore(Protocol):
 
     def fetch_body_text(self, ref: MessageRef) -> str:
         """Must not change message flags (BODY.PEEK semantics)."""
+        ...
+
+    def fetch_body(self, ref: MessageRef) -> BodyFetch:
+        """Budgeted body fetch (R-011): checks size/structure BEFORE loading,
+        loads only the needed text part with a byte limit, raises
+        ``BudgetExceeded`` for an over-size message, flags truncation."""
         ...
 
     def find_draft(self, target: str, message_id: str) -> list[MessageRef]:

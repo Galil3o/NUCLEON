@@ -6,6 +6,9 @@ Live Proton Bridge acceptance is deferred (post-v0.1).
 """
 from __future__ import annotations
 
+import base64
+import binascii
+import quopri
 import re
 from datetime import datetime, timedelta, timezone
 from email import message_from_bytes
@@ -14,7 +17,13 @@ from email.policy import default as _policy
 from email.utils import getaddresses, parsedate_to_datetime
 from typing import Any, Iterator, Optional
 
-from nucleon.mailstore import StaleReferenceError
+from nucleon.budgets import (
+    DEFAULT_MAX_BODY_BYTES,
+    DEFAULT_MAX_HEADER_BYTES,
+    DEFAULT_MAX_MESSAGE_BYTES,
+    BudgetExceeded,
+)
+from nucleon.mailstore import BodyFetch, StaleReferenceError
 from nucleon.models import MessageMeta, MessageRef
 
 # LIST attributes (RFC 3501 / RFC 6154 SPECIAL-USE) that mark a folder as
@@ -40,6 +49,103 @@ def _check(resp: Any, what: str) -> list:
     return data
 
 
+_TOKEN_RE = re.compile(rb'\s*(?:(\()|(\))|"((?:[^"\\]|\\.)*)"|([^\s()"]+))')
+
+
+def _parse_sexpr(data: bytes, start: int) -> list:
+    """Parse one parenthesised IMAP list (BODYSTRUCTURE) into nested lists.
+
+    Strings become ``str``, NIL ``None``, bare atoms ``str``/``int``. Anything
+    malformed raises ValueError: the caller then fails closed instead of
+    falling back to loading the whole message.
+    """
+    pos = start
+    stack: list[list] = []
+    root: list | None = None
+    while True:
+        m = _TOKEN_RE.match(data, pos)
+        if not m:
+            raise ValueError("unparseable BODYSTRUCTURE")
+        pos = m.end()
+        if m.group(1) is not None:
+            new: list = []
+            if stack:
+                stack[-1].append(new)
+            else:
+                root = new
+            stack.append(new)
+        elif m.group(2) is not None:
+            if not stack:
+                raise ValueError("unparseable BODYSTRUCTURE")
+            stack.pop()
+            if not stack:
+                return root if root is not None else []
+        else:
+            if not stack:
+                raise ValueError("unparseable BODYSTRUCTURE")
+            if m.group(3) is not None:
+                val: Any = m.group(3).decode("utf-8", "replace")
+            else:
+                atom = m.group(4)
+                val = None if atom.upper() == b"NIL" else (
+                    int(atom) if atom.isdigit() else atom.decode("utf-8", "replace"))
+            stack[-1].append(val)
+
+
+def _is_attachment(part: list) -> bool:
+    return any(
+        isinstance(x, list) and x and isinstance(x[0], str) and x[0].lower() == "attachment"
+        for x in part
+    )
+
+
+def _text_parts(node: list, prefix: str, out: list[tuple[str, str, list]]) -> None:
+    """Collect (part-number, subtype, part) for inline text/* leaves, in order."""
+    if node and isinstance(node[0], list):  # multipart: children first
+        n = 0
+        for child in node:
+            if not isinstance(child, list):
+                break
+            n += 1
+            _text_parts(child, f"{prefix}.{n}" if prefix else str(n), out)
+        return
+    if len(node) >= 7 and isinstance(node[0], str) and node[0].lower() == "text" \
+            and isinstance(node[1], str) and not _is_attachment(node):
+        out.append((prefix or "1", node[1].lower(), node))
+
+
+def _pick_text_part(structure: list) -> tuple[str, list] | None:
+    found: list[tuple[str, str, list]] = []
+    _text_parts(structure, "", found)
+    for want in ("plain", "html"):
+        for number, subtype, part in found:
+            if subtype == want:
+                return number, part
+    return None
+
+
+def _decode_part(data: bytes, part: list) -> str:
+    params = part[2] if isinstance(part[2], list) else []
+    charset = "utf-8"
+    for k, v in zip(params[0::2], params[1::2]):
+        if isinstance(k, str) and k.lower() == "charset" and isinstance(v, str):
+            charset = v
+    enc = (part[5] or "7bit").lower() if isinstance(part[5], str) else "7bit"
+    if enc == "base64":
+        clean = re.sub(rb"[^A-Za-z0-9+/=]", b"", data)
+        clean = clean[: len(clean) - len(clean) % 4]  # a cut mid-quantum is expected
+        try:
+            data = base64.b64decode(clean)
+        except (binascii.Error, ValueError):
+            data = b""
+    elif enc == "quoted-printable":
+        data = quopri.decodestring(data)
+    try:
+        return data.decode(charset, "replace")
+    except LookupError:
+        return data.decode("utf-8", "replace")
+
+
 class ImapMailStore:
     def __init__(
         self,
@@ -50,7 +156,13 @@ class ImapMailStore:
         drafts: str = "Drafts",
         outbox: str = "Nucleon/Outbox",
         sent: str = "Sent",
+        max_message_bytes: int = DEFAULT_MAX_MESSAGE_BYTES,
+        max_body_bytes: int = DEFAULT_MAX_BODY_BYTES,
+        max_header_bytes: int = DEFAULT_MAX_HEADER_BYTES,
     ) -> None:
+        self._max_message = max_message_bytes
+        self._max_body = max_body_bytes
+        self._max_header = max_header_bytes
         self._conn = conn
         self._account = account_hash
         self._trash = trash
@@ -115,7 +227,8 @@ class ImapMailStore:
         return b""
 
     def _header_bytes(self, uid: int) -> bytes:
-        return self._fetch(uid, "(BODY.PEEK[HEADER])")
+        # Byte-limited (R-011): an enormous header block is never loaded whole.
+        return self._fetch(uid, f"(BODY.PEEK[HEADER]<0.{self._max_header}>)")
 
     @staticmethod
     def _addrs(msg: Message, name: str) -> list[str]:
@@ -176,16 +289,33 @@ class ImapMailStore:
         self._select_checked(ref)
         return self._meta_from(ref, self._header_bytes(ref.uid))
 
-    def fetch_body_text(self, ref: MessageRef) -> str:
+    def fetch_body(self, ref: MessageRef) -> BodyFetch:
+        """R-011: size + MIME structure first, then ONLY the text part, byte-limited."""
         self._select_checked(ref)
-        msg = message_from_bytes(self._fetch(ref.uid, "(BODY.PEEK[])"), policy=_policy)
-        part = msg.get_body(preferencelist=("plain", "html"))
-        if part is None:
-            return ""
-        try:
-            return part.get_content()
-        except (LookupError, ValueError):
-            return ""
+        data = _check(
+            self._conn.uid("FETCH", str(ref.uid), "(RFC822.SIZE BODYSTRUCTURE)"), "FETCH"
+        )
+        blob = b" ".join(
+            (p[0] if isinstance(p, tuple) else p) for p in data if isinstance(p, (bytes, tuple))
+        )
+        size_m = re.search(rb"RFC822\.SIZE\s+(\d+)", blob)
+        bs_m = re.search(rb"BODYSTRUCTURE\s+\(", blob)
+        if not size_m or not bs_m:
+            raise ValueError("server did not report size/structure")
+        size = int(size_m.group(1))
+        if size > self._max_message:
+            raise BudgetExceeded("message_size", self._max_message, size)
+        picked = _pick_text_part(_parse_sexpr(blob, bs_m.end() - 1))
+        if picked is None:
+            return BodyFetch("", False, 0)
+        number, part = picked
+        part_size = part[6] if isinstance(part[6], int) else None
+        raw = self._fetch(ref.uid, f"(BODY.PEEK[{number}]<0.{self._max_body}>)")[: self._max_body]
+        truncated = part_size is not None and part_size > self._max_body
+        return BodyFetch(_decode_part(raw, part), truncated, part_size)
+
+    def fetch_body_text(self, ref: MessageRef) -> str:
+        return self.fetch_body(ref).text
 
     def list_sent(self, since_days: int, limit: int) -> list[MessageMeta]:
         validity = self._select(self._sent)

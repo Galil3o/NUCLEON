@@ -29,7 +29,13 @@ class FakeConn:
             return "OK", [b"5 6 7"]
         if command == "FETCH":
             item = args[1]
-            data = FULL if item == "(BODY.PEEK[])" else HDR
+            if "BODYSTRUCTURE" in item:
+                line = (b'1 (UID %s RFC822.SIZE %d BODYSTRUCTURE ("text" "plain" '
+                        b'("charset" "utf-8") NIL NIL "7bit" 11 1))' % (args[0].encode(), len(FULL)))
+                return "OK", [line]
+            if item.startswith("(BODY.PEEK[1]"):
+                return "OK", [(b"1 (UID %s BODY[1] {11}" % args[0].encode(), b"body line\r\n"), b")"]
+            data = HDR
             return "OK", [(b"1 (UID %s BODY[] {%d}" % (args[0].encode(), len(data)), data), b")"]
         return "OK", [b""]
 
@@ -85,7 +91,8 @@ def test_fetch_body_uses_peek(store, conn):
     conn.cmds.clear()
     assert "body line" in store.fetch_body_text(ref)
     items = [c[3] for c in conn.cmds if c[:2] == ("UID", "FETCH")]
-    assert items and all("BODY.PEEK[" in i for i in items)
+    # RFC822.SIZE/BODYSTRUCTURE are pure metadata and never set \\Seen.
+    assert items and all("BODY.PEEK[" in i or i == "(RFC822.SIZE BODYSTRUCTURE)" for i in items)
     assert all(not re.search(r"(?<!PEEK)BODY\[", i) for i in items)
 
 
@@ -101,7 +108,8 @@ def test_fetch_meta_populates_message_id(store, conn):
     assert m.references == ["<m-1@x.com>", "<m0@x.com>"]
     assert m.date is not None
     items = [c[3] for c in conn.cmds if c[:2] == ("UID", "FETCH")]
-    assert items and all("BODY.PEEK[" in i for i in items)
+    # RFC822.SIZE/BODYSTRUCTURE are pure metadata and never set \\Seen.
+    assert items and all("BODY.PEEK[" in i or i == "(RFC822.SIZE BODYSTRUCTURE)" for i in items)
 
 
 def test_list_sent_is_read_only(store, conn):
