@@ -23,6 +23,7 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from nucleon.appendlog import append_line
 from nucleon.quarantine import ClassifierOutputError
 
 FailedStage = Literal["fetch", "classify", "gate", "act"]
@@ -101,11 +102,7 @@ class AnalysisLog:
             steps_completed=tuple(steps),  # type: ignore[arg-type]
             ts=datetime.now(timezone.utc),
         )
-        parent = os.path.dirname(self._path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
-        with open(self._path, "a", encoding="utf-8") as f:
-            f.write(rec.model_dump_json() + "\n")
+        append_line(self._path, rec.model_dump_json())  # R-013
         return rec
 
 
@@ -158,13 +155,9 @@ class Stage3Store:
         ref = ref_pseudonym or confirmation.ref_pseudonym
         if ref != confirmation.ref_pseudonym:
             raise Stage3NotConfirmed("confirmation is for a different message")
-        parent = os.path.dirname(self._path)
-        if parent:
-            os.makedirs(parent, exist_ok=True)
         line = json.dumps({"ref_pseudonym": ref, "expires_at": confirmation.expires_at.isoformat(),
                            "content": content})
-        with open(self._path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        append_line(self._path, line)  # R-013
 
     def purge_expired(self) -> int:
         """Drop expired records (rewrite the file); returns how many were removed."""
