@@ -17,6 +17,17 @@ from nucleon.journal import build_journal
 from nucleon.marker import build_marker
 from nucleon.recipients import ContactBook, FileLearnedStore
 
+# Exit status (documented in the README):
+#   0  everything ok (a message that vanished mid-run is benign and counts as ok)
+#   1  runtime error (adapter/server/preflight failure; no usable result)
+#   2  configuration error (missing/invalid/unparseable config, account identity)
+#   3  the run completed but at least one message failed (errors) or was rejected
+#      by a size budget (over_budget); successful actions are still all reported
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_CONFIG = 2
+EXIT_RUN_FAILURES = 3
+
 Deps = Callable[[Config], tuple[Any, Any, Any]]
 
 
@@ -73,15 +84,16 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
         cfg = load_config(args.config)
     except FileNotFoundError:
         print(f"nucleon: config file not found: {args.config}", file=sys.stderr)
-        return 2
+        return EXIT_CONFIG
     except (ValidationError, ValueError, OSError) as exc:
         print(f"nucleon: invalid config {args.config}: {exc}", file=sys.stderr)
-        return 2
+        return EXIT_CONFIG
     try:
         AccountRegistry(cfg.registry_path).check(cfg)
     except AccountIdentityChanged as exc:
         print(f"nucleon: {exc}", file=sys.stderr)
-        return 2
+        return EXIT_CONFIG
+    exit_code = EXIT_OK
     try:
         store, classifier, journal = deps(cfg)
         if args.command == "run":
@@ -98,13 +110,15 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
             for ev in r.budget_events:  # per-message visibility; no content, pseudonym only
                 print(f"budget: kind={ev.kind} outcome={ev.outcome} limit={ev.limit} "
                       f"observed={ev.observed} ref={ev.ref_pseudonym}")
+            if r.errors or r.over_budget:  # R-014: failures must not look like success
+                exit_code = EXIT_RUN_FAILURES
         else:
             rep = reconcile(store, journal, cfg)
             print(f"reconciled={rep.sent} observed={rep.observed}")
     except Exception as exc:  # handled error: short message, no traceback
         print(f"nucleon: error: {exc}", file=sys.stderr)
-        return 1
-    return 0
+        return EXIT_ERROR
+    return exit_code
 
 
 def cli() -> None:

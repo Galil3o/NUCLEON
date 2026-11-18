@@ -380,7 +380,7 @@ def test_cli_prints_budget_summary(tmp_path, capsys):
     rc = cli.main(["run", "--config", str(p)],
                   deps=lambda cfg: (store, FakeClassifier(_cls()), NullJournal()))
     out = capsys.readouterr().out
-    assert rc == 0 and "over_budget=1" in out
+    assert rc == 3  # R-014: a rejected message is a failed run and "over_budget=1" in out
     assert "budget: kind=message_size outcome=rejected limit=100 observed=500" in out
 
 
