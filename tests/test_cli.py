@@ -47,7 +47,7 @@ def test_reconcile_subcommand_invokes_reconcile(tmp_path, capsys):
     rc = cli.main(["reconcile", "--config", _config(tmp_path)],
                   deps=lambda cfg: (FakeMailStore(), FakeClassifier(None), NullJournal()))
     assert rc == 0
-    assert capsys.readouterr().out.strip() == "reconciled=0"
+    assert capsys.readouterr().out.strip() == "reconciled=0 observed=0"
 
 
 def test_help_exits_zero():

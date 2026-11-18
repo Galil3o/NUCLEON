@@ -1,7 +1,7 @@
 import hashlib
 
 from nucleon.config import Config
-from nucleon.engine import RunReport, diagnose_partial, reconcile, run_once
+from nucleon.engine import ReconcileReport, RunReport, diagnose_partial, reconcile, run_once
 from nucleon.marker import FileMarkerStore, ProcessingMarker
 from nucleon.journal import FileJournalStore, NullJournal, StoredJournal
 from nucleon.mailstore.fake import FakeMailStore
@@ -95,7 +95,7 @@ def _drafted_setup(tmp_path):
     return store, j
 
 
-def test_reconcile_marks_sent_when_matching_sent_appears(tmp_path):
+def test_reconcile_conversation_match_is_only_an_observed_reply(tmp_path):
     store, j = _drafted_setup(tmp_path)
     sent_ref = MessageRef.from_source("a", "Sent", 1, 9, "<out@x>", b"s")
     store.seed_sent(
@@ -103,9 +103,9 @@ def test_reconcile_marks_sent_when_matching_sent_appears(tmp_path):
                     to_addrs=["a@b.c"], in_reply_to="<in@x>")
     )
     assert hashlib.sha256(b"<in@x>").hexdigest() == j.drafted_unsent()[0].message_id_hash
-    assert reconcile(store, j, _cfg()) == 1
-    assert j.drafted_unsent() == []
-    assert reconcile(store, j, _cfg()) == 0
+    # R-006: a reply that merely references the original is NOT proof of "sent".
+    assert reconcile(store, j, _cfg()) == ReconcileReport(sent=0, observed=1)
+    assert len(j.drafted_unsent()) == 1
 
 
 def test_reconcile_no_match_marks_nothing(tmp_path):
@@ -119,7 +119,7 @@ def test_reconcile_no_match_marks_nothing(tmp_path):
         MessageMeta(ref=MessageRef.from_source("a", "Sent", 1, 10, None, b"t"),
                     subject="s", from_addr="d@e.f", to_addrs=["a@b.c"])
     )
-    assert reconcile(store, j, _cfg()) == 0
+    assert reconcile(store, j, _cfg()) == ReconcileReport(0, 0)
     assert len(j.drafted_unsent()) == 1
 
 
@@ -465,3 +465,98 @@ def test_r004_journal_drafted_entry_carries_draft_reference(tmp_path):
     run_once(store, FakeClassifier(_cls(needs_reply=True, draft_body="Hi")), j, _cfg(), _marker(tmp_path))
     e = j._store.entries()[0]
     assert e.draft_message_id_hash and e.draft_confirmed is True
+
+
+# -- R-006: exact draft identity -> "sent"; conversation only -> "observed reply"
+def _sent_meta(mid, irt=None, uid=9):
+    ref = MessageRef.from_source("a", "Sent", 1, uid, mid, b"s%d" % uid)
+    return MessageMeta(ref=ref, subject="Re: Hello", from_addr="d@e.f", to_addrs=["a@b.c"],
+                       in_reply_to=irt, message_id=mid)
+
+
+def _own_draft_mid():
+    from nucleon.actions import draft_message_id
+
+    return draft_message_id(_meta().ref.processing_key())
+
+
+def test_r006_separately_composed_reply_is_observed_not_sent(tmp_path):
+    store, j = _drafted_setup(tmp_path)
+    store.seed_sent(_sent_meta("<handwritten@x>", irt="<in@x>"))
+    assert reconcile(store, j, _cfg()) == ReconcileReport(sent=0, observed=1)
+    assert len(j.drafted_unsent()) == 1  # the proposal is still open
+    e = j._store.entries()[-1]
+    assert e.action == "observed_reply" and e.status == "observed_reply"
+    # idempotent: no second observation record
+    n = len(j._store.entries())
+    assert reconcile(store, j, _cfg()) == ReconcileReport(0, 0)
+    assert len(j._store.entries()) == n
+
+
+def test_r006_draft_message_id_in_sent_means_sent(tmp_path):
+    store, j = _drafted_setup(tmp_path)
+    store.seed_sent(_sent_meta(_own_draft_mid(), irt="<in@x>"))
+    assert reconcile(store, j, _cfg()) == ReconcileReport(sent=1, observed=0)
+    assert j.drafted_unsent() == []
+    assert j._store.entries()[-1].status == "sent"
+
+
+def test_r006_observed_then_real_send_upgrades_to_sent(tmp_path):
+    store, j = _drafted_setup(tmp_path)
+    store.seed_sent(_sent_meta("<handwritten@x>", irt="<in@x>", uid=8))
+    reconcile(store, j, _cfg())
+    store.seed_sent(_sent_meta(_own_draft_mid(), irt="<in@x>", uid=9))
+    assert reconcile(store, j, _cfg()) == ReconcileReport(sent=1, observed=0)
+    assert j.drafted_unsent() == []
+
+
+def test_r006_unconfirmed_draft_is_never_reported_as_sent(tmp_path):
+    from nucleon.models import JournalEntry
+    from datetime import datetime, timezone
+
+    store, j = FakeMailStore(), _journal(tmp_path)
+    m = _meta()
+    j.record(JournalEntry(
+        ref_key=m.ref.key(), account_hash="a", mailbox="INBOX", uid=1,
+        message_id_hash=m.ref.message_id_hash, raw_hash="r", action="drafted", status="ok",
+        ts=datetime(2020, 1, 1, tzinfo=timezone.utc),
+        draft_message_id_hash=hashlib.sha256(_own_draft_mid().encode()).hexdigest(),
+        draft_confirmed=False,
+    ))
+    store.seed_sent(_sent_meta(_own_draft_mid(), irt="<in@x>"))
+    assert reconcile(store, j, _cfg()) == ReconcileReport(sent=0, observed=1)
+
+
+def test_r006_legacy_entry_without_draft_id_falls_back_to_observed(tmp_path):
+    from nucleon.models import JournalEntry
+    from datetime import datetime, timezone
+
+    store, j = FakeMailStore(), _journal(tmp_path)
+    m = _meta()
+    j.record(JournalEntry(
+        ref_key=m.ref.key(), account_hash="a", mailbox="INBOX", uid=1,
+        message_id_hash=m.ref.message_id_hash, raw_hash="r", action="drafted", status="ok",
+        ts=datetime(2020, 1, 1, tzinfo=timezone.utc),
+    ))
+    store.seed_sent(_sent_meta("<x@x>", irt="<in@x>"))
+    assert reconcile(store, j, _cfg()) == ReconcileReport(sent=0, observed=1)
+
+
+def test_r006_reconcile_has_its_own_timestamp_not_the_drafts(tmp_path):
+    from datetime import datetime, timezone
+
+    store, j = _drafted_setup(tmp_path)
+    drafted = j._store.entries()[0]
+    store.seed_sent(_sent_meta(_own_draft_mid()))
+    t0 = datetime.now(timezone.utc)
+    reconcile(store, j, _cfg())
+    sent = j._store.entries()[-1]
+    assert sent.action == "marked_sent" and sent.ts != drafted.ts and sent.ts >= t0
+
+
+def test_r006_reconcile_is_read_only_on_the_mailbox(tmp_path):
+    store, j = _drafted_setup(tmp_path)
+    store.seed_sent(_sent_meta(_own_draft_mid()))
+    guard = _WriteGuard(store)
+    reconcile(guard, j, _cfg())
+    assert not (set(guard.calls) & _WriteGuard.WRITES)

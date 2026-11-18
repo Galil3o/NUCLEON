@@ -176,19 +176,43 @@ def diagnose_partial(store: MailStore, marker: ProcessingMarker) -> list[Partial
     return out
 
 
-def reconcile(store: MailStore, journal: Journal, cfg: Config) -> int:
-    """Mark drafted entries as sent when a Sent reply to the original appears.
+@dataclass(frozen=True)
+class ReconcileReport:
+    sent: int = 0  # provider-confirmed draft identity seen in Sent
+    observed: int = 0  # only the conversation is evidenced: "observed reply"
 
-    Read-only on the mailbox: only ``list_sent`` is called.
+
+def reconcile(store: MailStore, journal: Journal, cfg: Config) -> ReconcileReport:
+    """Match Sent mail against open drafts. Read-only on the mailbox.
+
+    "sent" requires the stable, provider-confirmed draft identity (the draft's
+    own Message-ID, recorded with a confirmed APPENDUID) to appear in Sent. A
+    reply that merely references the original message (In-Reply-To) proves only
+    the conversation, so it is recorded as "observed reply" and the proposal
+    stays open. Entries without a confirmed draft id can only ever be observed.
     """
-    pending = {e.message_id_hash: e for e in journal.drafted_unsent() if e.message_id_hash}
-    count = 0
-    for sent in store.list_sent(cfg.mail.since_days, cfg.mail.limit):
+    pending = journal.drafted_unsent()
+    by_draft = {e.draft_message_id_hash: e for e in pending
+                if e.draft_message_id_hash and e.draft_confirmed}
+    by_source: dict[str, list] = {}
+    for e in pending:
+        if e.message_id_hash:
+            by_source.setdefault(e.message_id_hash, []).append(e)
+    sent_n = observed_n = 0
+    done: set[str] = set()
+    sent_metas = store.list_sent(cfg.mail.since_days, cfg.mail.limit)
+    for sent in sent_metas:  # pass 1: exact identity
+        h = sent.ref.message_id_hash
+        entry = by_draft.get(h) if h else None
+        if entry is not None and entry.ref_key not in done:
+            journal.mark_sent(entry.ref_key)
+            done.add(entry.ref_key)
+            sent_n += 1
+    for sent in sent_metas:  # pass 2: conversation evidence only
         if sent.in_reply_to is None:
             continue
         h = hashlib.sha256(sent.in_reply_to.encode()).hexdigest()
-        entry = pending.pop(h, None)
-        if entry is not None:
-            journal.mark_sent(entry.ref_key)
-            count += 1
-    return count
+        for entry in by_source.get(h, []):
+            if entry.ref_key not in done and journal.mark_observed(entry.ref_key):
+                observed_n += 1
+    return ReconcileReport(sent_n, observed_n)

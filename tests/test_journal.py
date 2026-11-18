@@ -108,3 +108,22 @@ def test_file_store_skips_corrupt_line(tmp_path):
         f.write('{"ref_key": "trunc\n')
     got = store.entries()
     assert [e.ref_key for e in got] == ["good"]
+
+
+def test_mark_sent_uses_its_own_timestamp(tmp_path):
+    j = StoredJournal(FileJournalStore(str(tmp_path / "j.jsonl")))
+    j.record(make_entry(action="drafted"))
+    j.mark_sent("r1")
+    last = j._store.entries()[-1]
+    assert last.action == "marked_sent" and last.ts > datetime(2026, 1, 2, tzinfo=timezone.utc)
+
+
+def test_mark_observed_keeps_draft_open_and_is_idempotent(tmp_path):
+    j = StoredJournal(FileJournalStore(str(tmp_path / "j.jsonl")))
+    j.record(make_entry(action="drafted"))
+    assert j.mark_observed("r1") is True
+    assert j.mark_observed("r1") is False
+    assert [e.ref_key for e in j.drafted_unsent()] == ["r1"]
+    assert j._store.entries()[-1].status == "observed_reply"
+    assert j.mark_observed("unknown") is False
+    assert NullJournal().mark_observed("r1") is False
