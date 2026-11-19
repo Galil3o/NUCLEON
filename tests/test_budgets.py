@@ -216,7 +216,7 @@ def _mmeta():
 
 def test_oversize_model_content_is_rejected():
     big = {"choices": [{"message": {"content": "x" * 5000}}]}
-    clf = LLMClassifier("http://127.0.0.1:1", "m", http_post=lambda u, p: big,
+    clf = LLMClassifier("http://127.0.0.1:1", "m", http_post=lambda u, p, h: big,
                         max_response_bytes=1000)
     with pytest.raises(BudgetExceeded) as e:
         clf.classify(_mmeta(), "b")
