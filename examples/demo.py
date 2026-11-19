@@ -12,6 +12,8 @@ from email import policy
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
 
+from nucleon.accounts import account_hash_for  # noqa: E402
+from nucleon.actions import draft_message_id  # noqa: E402
 from nucleon.config import Config  # noqa: E402
 from nucleon.engine import reconcile, run_once  # noqa: E402
 from nucleon.gate import decide  # noqa: E402
@@ -23,11 +25,9 @@ from nucleon.models import (  # noqa: E402
 )
 from nucleon.quarantine import Classifier  # noqa: E402
 
-ACCOUNT = "demo-account"
 
-
-def make_meta(uid: int, subject: str, sender: str, mid: str, **kw) -> MessageMeta:
-    ref = MessageRef.from_source(ACCOUNT, "INBOX", 1, uid, mid, f"raw-{uid}".encode())
+def make_meta(account: str, uid: int, subject: str, sender: str, mid: str, **kw) -> MessageMeta:
+    ref = MessageRef.from_source(account, "INBOX", 1, uid, mid, f"raw-{uid}".encode())
     return MessageMeta(ref=ref, subject=subject, from_addr=sender,
                        to_addrs=["me@example.com"], message_id=mid, **kw)
 
@@ -42,6 +42,11 @@ class DemoClassifier:
                 category="personal", labels=["nucleon/personal", "nucleon/follow-up"], urgency="normal",
                 needs_reply=True,
                 draft_body="Hi,\n\nThursday at noon works for me. See you then!\n")
+        if "invoice" in s:
+            return Classification(
+                category="work", labels=["nucleon/work", "nucleon/follow-up"], urgency="normal",
+                needs_reply=True,
+                draft_body="Hi,\n\nThe invoice is attached to my previous mail. Best regards\n")
         if "newsletter" in s:
             return Classification(category="newsletter", labels=["nucleon/newsletter"],
                                   urgency="low", needs_reply=False)
@@ -73,14 +78,19 @@ def main() -> None:
         "marker": {"backend": "file", "path": os.path.join(tmp, "marker.jsonl")},
     })
 
+    # R-012: the account id used for refs MUST be the engine's config-derived hash,
+    # otherwise reconcile filters every draft out as "another account's".
+    account = account_hash_for(cfg)
     store = FakeMailStore()
     msgs = [
-        (make_meta(1, "Lunch on Thursday?", "sender@example.com", "<lunch-1@example.com>"),
+        (make_meta(account, 1, "Lunch on Thursday?", "sender@example.com", "<lunch-1@example.com>"),
          "Hi, are you free for lunch this Thursday?"),
-        (make_meta(2, "Weekly newsletter: top 10 tips", "news@example.com",
+        (make_meta(account, 2, "Weekly newsletter: top 10 tips", "news@example.com",
                    "<news-2@example.com>"), "Ten tips you will not believe. Unsubscribe below."),
-        (make_meta(3, "Your build finished", "ci@example.com", "<ci-3@example.com>"),
+        (make_meta(account, 3, "Your build finished", "ci@example.com", "<ci-3@example.com>"),
          "Build #42 passed."),
+        (make_meta(account, 4, "Invoice question", "billing@example.com",
+                   "<inv-4@example.com>"), "Could you resend the invoice?"),
     ]
     for meta, body in msgs:
         store.seed_inbox(meta, body)
@@ -139,15 +149,27 @@ def main() -> None:
 
     section("7. Reconciliation")
     print(f"  Unsent drafts before: {len(journal.drafted_unsent())}")
-    sent_ref = MessageRef.from_source(ACCOUNT, "Sent", 1, 1, "<sent-1@example.com>", b"sent-1")
+    # (a) EXACT "sent": Sent holds the draft itself (its own stable Message-ID).
+    lunch_ref = msgs[0][0].ref
+    sent_id = draft_message_id(lunch_ref.processing_key())
     store.seed_sent(MessageMeta(
-        ref=sent_ref, subject="Re: Lunch on Thursday?", from_addr="me@example.com",
-        to_addrs=["sender@example.com"], message_id="<sent-1@example.com>",
+        ref=MessageRef.from_source(account, "Sent", 1, 1, sent_id, b"sent-1"),
+        subject="Re: Lunch on Thursday?", from_addr="me@example.com",
+        to_addrs=["sender@example.com"], message_id=sent_id,
         in_reply_to="<lunch-1@example.com>"))
-    print("  Seeded Sent folder with a reply whose In-Reply-To is <lunch-1@example.com>")
-    n = reconcile(store, journal, cfg)
-    print(f"  Drafts marked sent: {n}")
+    print("  Seeded Sent with the exact draft Message-ID of the lunch reply (-> sent)")
+    # (b) only an "observed reply": a different Message-ID, In-Reply-To the invoice mail.
+    store.seed_sent(MessageMeta(
+        ref=MessageRef.from_source(account, "Sent", 1, 2, "<hand-written-2@example.com>", b"sent-2"),
+        subject="Re: Invoice question", from_addr="me@example.com",
+        to_addrs=["billing@example.com"], message_id="<hand-written-2@example.com>",
+        in_reply_to="<inv-4@example.com>"))
+    print("  Seeded Sent with a hand-written reply to <inv-4@example.com> (-> observed reply)")
+    rep = reconcile(store, journal, cfg)
+    print(f"  Reconcile: sent={rep.sent} (exact draft match), "
+          f"observed reply={rep.observed} (conversation evidence only, proposal stays open)")
     print(f"  Unsent drafts after: {len(journal.drafted_unsent())}")
+    assert rep.sent == 1 and rep.observed == 1, rep
 
     print("\nNote: a live run needs a real Proton Bridge (IMAP) and a local classifier")
     print("endpoint; that is deferred. This demo only exercises the offline pipeline.")
