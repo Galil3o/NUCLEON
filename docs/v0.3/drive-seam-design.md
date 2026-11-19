@@ -116,31 +116,23 @@ SGB behält seine juristik-spezifische Nutzung; Nucleon seine Mail-Nutzung.
   Datei-Inhalte; die Data-Map ist ein separater Store. **Sensible Pfad-/Dateinamen**
   (SGB-Befund R-012) beachten: ggf. opake uids nach außen, Namen nur lokal.
 
-## Angrenzend: Historien-Personalisierung (eigener Baustein — zur Bestätigung)
-Bewusst **freigebbarer** Initial-Vollscan + Bewertung, **getrennt für Mail und Drive**:
-leitet aus der Historie ab, wie der Nutzer bisher reagiert/abgelegt hat, und speist
-Klassifikation (Mail) + Modell-Zuordnung (Drive, Modus 3). Der Nutzer-Bestand wird so
-zum „Training Space" für den persönlichen LLM-Einsatz.
-- **Zu bestätigen (NIE RATEN):** „Training" = voraussichtlich **(a)** lokales,
-  einsehbares **Verhaltensprofil** (Muster → Few-Shot/Hinweise), **nicht** Gewichts-
-  Training; **(b)** echtes Fein-Tuning nur mit **lokalem** Modell denkbar. Hartregel in
-  beiden: **nichts über den Korpus verlässt das Gerät für ein Remote-Modell** (fällt mit
-  der Provider-Naht zusammen).
-- **Klare Naht:** Opt-in je Mail/Drive; Profil = lokaler, prüfbarer Artefakt; volles
-  Profil nur mit lokalem Modell, Remote-Modell bekommt minimale/keine Merkmale.
-- **Scope:** spannt Mail **und** Drive → größer als die Drive-Naht; Kandidat für eigenen
-  Seed (s. Offen).
+## Angrenzend: Historien-Personalisierung → eigener Seed
+Der Lern-/Personalisierungs-Baustein (bewusst freigebbarer Initial-Scan von Mail+Drive
+→ lokales Nutzer-Profil, speist Mail-Klassifikation und Drive-**Modus 3**) ist
+**ausgelagert** nach `docs/personalization/history-learning-seed.md` — damit diese
+Drive-Naht unabhängig lieferbar bleibt. Entscheidung dort: **(a)** Verhaltensprofil
+zuerst, **(b)** Fein-Tuning folgt definitiv (opt-in + Warnhinweis, komplette Naht).
+Modus 3 nutzt das Profil, sobald der Lern-Seed liefert; bis dahin Modus 1+2.
 
-## Offen (nächste Runden — Owner/Design)
-- **kit-Repo/Name** (`Galil3o/proton-drive-kit`?), Lizenz, Sprache (Python, passend
-  zu beiden).
-- **SGB-Migration jetzt oder später** (zuerst extrahieren, dann SGB umstellen?).
-- **E-Mail-als-PDF**: Rendering-Weg (welches Tool erzeugt den „Abdruck")?
-- **Data-Map-Format in Nucleon** (SGBs TSV wiederverwenden vs. JSON).
-- **OTS-Anker** optional für Nucleon?
-- **Lern-Baustein:** (a) lokales Verhaltensprofil vs. (b) nur-lokales Fein-Tuning?
-  Als eigener Seed auslagern (damit V0.3/Drive unabhängig bleibt)?
-- **CLI-Auth/Setup** (dbus/keyring) für den Dauerbetrieb auf dem Cube.
+## Festgelegt (meine Calls — vetobar)
+- **kit:** neues Repo `Galil3o/proton-drive-kit`, Python (passt zu Nucleon + SGB).
+- **SGB-Migration:** zuerst kit extrahieren + Nucleon konsumiert; SGB danach umstellen
+  (blockt die Drive-Naht nicht).
+- **Data-Map-Format:** SGBs TSV-Schema wiederverwenden (Konsistenz, erprobt).
+- **OTS-Anker:** für Nucleon default aus (später zuschaltbar).
+- **E-Mail-als-PDF („Abdruck"):** Render über das vorinstallierte headless-Chromium
+  (Kopf From/To/Date/Subject + Body, Anhänge gelistet); kleiner Treue-Spike beim Bau.
+- **CLI-Auth/Setup:** dbus + gnome-keyring wie SGBs `run_scan2.sh` beim Bau einrichten.
 
 > Reihenfolge: nachrangig zum laufenden **v0.2-Live-Gang** (echtes Modell, Pilot).
 > Gebaut wird erst nach Owner-Freigabe dieses Designs.
