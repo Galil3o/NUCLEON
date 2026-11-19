@@ -74,6 +74,9 @@ class ClassifierConfig(BaseModel):
     endpoint: str
     model: str
     allow_remote: bool = False
+    # Omitted from the model request by default (None). Claude 4.7+ / Gemini reject
+    # temperature < 1 via the OpenAI-compat layer; set this only for a local model.
+    temperature: Optional[float] = None
 
     @model_validator(mode="after")
     def _endpoint_is_privacy_safe(self) -> "ClassifierConfig":

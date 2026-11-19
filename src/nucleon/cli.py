@@ -52,6 +52,7 @@ def build_classifier(cfg: Config):
     return LLMClassifier(
         cfg.classifier.endpoint, cfg.classifier.model,
         api_key=os.environ.get("NUCLEON_CLASSIFIER_API_KEY"),
+        temperature=cfg.classifier.temperature,
         max_response_bytes=cfg.limits.max_model_response_bytes,
     )
 
