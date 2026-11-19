@@ -66,13 +66,17 @@ Nachbau verlöre Know-how; Weg 3 „loser Vertrag" — Duplizierung, Drift.)
   gespeichert und wohin", statt dir den Ordner zu merken. **Floor (immer): sprechende
   Umbenennung** — `att0001.pdf` → `JJJJMMTT_Kontext_Originalname` (ISO-Basisformat, ohne Trennstriche). Nucleon
   referenziert nur **uid/Metadaten**, nie Inhalt.
-- **Platzierung (Schreibziel) — entschieden außer Modus:** immer in einen **begrenzten
-  Schreibbereich** (Whitelist). Modi (offen): **Eingang-Default** (ein `Nucleon/
-  Eingang`, du verteilst später; Map macht's auffindbar) vs. **Routing-Regeln** (opt-in,
-  deterministisch Kategorie/Absender/Label → thematischer Unterordner; Regeln legst
-  **du** fest, das Modell erfindet keinen Ordner). Freie Modell-Platzierung (Modell
-  liest Taxonomie, entscheidet selbst) **zurückgestellt** — Fehlablage ist der eine
-  Fehler, den die Map nachvollziehbar, aber nicht ungeschehen macht.
+- **Platzierung (Schreibziel) — entschieden 2026-11-19:** immer in einen **begrenzten
+  Schreibbereich** (Whitelist); der Modus ist **pro Nutzer wählbar** (Config):
+  **(1) Eingang-Default** — ein `Nucleon/Eingang`, du verteilst selbst (volle Hoheit);
+  **(2) Routing-Regeln** — deterministisch Kategorie/Absender/Label → thematischer
+  Unterordner, Regeln legst **du** fest; **(3) Modell-Zuordnung** — das Modell ordnet
+  thematisch **innerhalb des Schreibbereichs** selbst zu (max. Unterstützung). Modus 3
+  ist **nicht mehr zurückgestellt**: (a) explizite Nutzerwahl, (b) die Whitelist begrenzt
+  Fehlablage **innerhalb** ohnehin freigegebener Ordner, (c) der Lauf-Bericht macht jede
+  Ablage sichtbar und leicht korrigierbar; seine Qualität steigt mit der Historien-
+  Personalisierung (s. u.). **Bau-Reihenfolge:** 1+2 in V0.3, 3 als Fast-Follow mit der
+  Lern-Schicht.
 - **Attach-Use-Case — entschieden 2026-11-19:** die **harte Grenze ist der freigegebene
   Lese-Teilbereich** (Ordner-Whitelist; Default eng/explizit, per Config bis „alle"
   weitbar). **Innerhalb** darf das Modell Dateien frei referenzieren (uid oder Name) →
@@ -81,12 +85,17 @@ Nachbau verlöre Know-how; Weg 3 „loser Vertrag" — Duplizierung, Drift.)
   werden dort **laut** gezeigt (Name + Pfad + „aus Drive"), weil der Prüfer den Datei-
   *Inhalt* — anders als einen Empfänger-String — nicht mitliest. (Der Teilbereich ist
   der R-009-Analog, nicht die Modell-Freiheit darin.)
-- **Lauf-Bericht (Drive-Schreibzugriff) — entschieden, Kanal offen:** ein Nucleon-Lauf
-  mit Drive-Schreibrecht gibt am Ende eine **menschenlesbare Zusammenfassung** „welche
-  Datei aus welcher Mail wohin abgelegt" (aus Journal/Map gespeist; Daten liegen ohnehin
-  vor). Als **Lauf-Digest**, nicht pro Datei. Kein GUI-Popup bei headless-Cube-Lauf —
-  realistische Kanäle: Bericht-Datei + stdout (Pull) und/oder Digest in die eigene
-  Mailbox (Push, nur bei Läufen mit Schreibzugriff).
+- **Lauf-Bericht (Drive-Schreibzugriff) — Kanal entschieden 2026-11-19:** aus
+  Journal/Map gespeiste, **menschenlesbare Zusammenfassung** „welche Datei aus welcher
+  Mail wohin abgelegt", erzeugt als **strukturiertes Artefakt** (ein Renderer je Kanal).
+  Kanäle: **Mailbox-Digest = universeller Default** — IMAP-Append in `Nucleon/Log`, kein
+  Versand nach außen; die Mailbox ist die **garantierte** Fläche eines Mail-Tools (ein
+  headless-CLI-Nutzer hat nicht unbedingt Datei-/Repo-Zugriff). Zusätzlich **Bericht-
+  Datei + stdout** für Nutzer mit Dateizugriff (unser Setup; bleibt). **Kadenz pro Nutzer
+  einstellbar:** pro Lauf / alle N Stunden / täglich / monatlich — Schreib-Records werden
+  zwischen Zustellungen akkumuliert und beim nächsten Lauf nach Erreichen der Schwelle
+  geflusht (kein separater Scheduler nötig). Dasselbe Artefakt speist später eine
+  **geplante GUI** (das ursprüngliche „Pop-up").
 - **Data-Map-Scan:** Nucleon scannt einen konfigurierten Teilbereich → lokaler
   uid-Index (separater Store wie Marker/Journal).
 
@@ -107,16 +116,30 @@ SGB behält seine juristik-spezifische Nutzung; Nucleon seine Mail-Nutzung.
   Datei-Inhalte; die Data-Map ist ein separater Store. **Sensible Pfad-/Dateinamen**
   (SGB-Befund R-012) beachten: ggf. opake uids nach außen, Namen nur lokal.
 
+## Angrenzend: Historien-Personalisierung (eigener Baustein — zur Bestätigung)
+Bewusst **freigebbarer** Initial-Vollscan + Bewertung, **getrennt für Mail und Drive**:
+leitet aus der Historie ab, wie der Nutzer bisher reagiert/abgelegt hat, und speist
+Klassifikation (Mail) + Modell-Zuordnung (Drive, Modus 3). Der Nutzer-Bestand wird so
+zum „Training Space" für den persönlichen LLM-Einsatz.
+- **Zu bestätigen (NIE RATEN):** „Training" = voraussichtlich **(a)** lokales,
+  einsehbares **Verhaltensprofil** (Muster → Few-Shot/Hinweise), **nicht** Gewichts-
+  Training; **(b)** echtes Fein-Tuning nur mit **lokalem** Modell denkbar. Hartregel in
+  beiden: **nichts über den Korpus verlässt das Gerät für ein Remote-Modell** (fällt mit
+  der Provider-Naht zusammen).
+- **Klare Naht:** Opt-in je Mail/Drive; Profil = lokaler, prüfbarer Artefakt; volles
+  Profil nur mit lokalem Modell, Remote-Modell bekommt minimale/keine Merkmale.
+- **Scope:** spannt Mail **und** Drive → größer als die Drive-Naht; Kandidat für eigenen
+  Seed (s. Offen).
+
 ## Offen (nächste Runden — Owner/Design)
 - **kit-Repo/Name** (`Galil3o/proton-drive-kit`?), Lizenz, Sprache (Python, passend
   zu beiden).
 - **SGB-Migration jetzt oder später** (zuerst extrahieren, dann SGB umstellen?).
 - **E-Mail-als-PDF**: Rendering-Weg (welches Tool erzeugt den „Abdruck")?
 - **Data-Map-Format in Nucleon** (SGBs TSV wiederverwenden vs. JSON).
-- **Schreib-Platzierungsmodus:** Eingang-Default vs. Routing-Regeln (freie
-  Modell-Platzierung zurückgestellt); OTS-Anker optional für Nucleon?
-- **Lauf-Bericht-Kanal:** Bericht-Datei + stdout (Pull) vs. zusätzlich Mailbox-Digest
-  (Push, nur bei Schreib-Läufen).
+- **OTS-Anker** optional für Nucleon?
+- **Lern-Baustein:** (a) lokales Verhaltensprofil vs. (b) nur-lokales Fein-Tuning?
+  Als eigener Seed auslagern (damit V0.3/Drive unabhängig bleibt)?
 - **CLI-Auth/Setup** (dbus/keyring) für den Dauerbetrieb auf dem Cube.
 
 > Reihenfolge: nachrangig zum laufenden **v0.2-Live-Gang** (echtes Modell, Pilot).
