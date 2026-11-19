@@ -46,7 +46,7 @@ def test_valid_response_parsed_to_classification():
     url, payload = calls[0]
     assert url == "http://localhost:11434/v1/chat/completions"
     assert payload["model"] == "m1"
-    assert payload["temperature"] == 0 and payload["stream"] is False
+    assert payload["stream"] is False
     assert "BODYTEXT" in json.dumps(payload)
     assert isinstance(_clf(stub), Classifier)
 
@@ -103,3 +103,28 @@ def test_full_chat_completions_url_used_verbatim():
     ep = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     LLMClassifier(ep, "gemini-x", http_post=stub).classify(_meta(), "b")
     assert calls[0] == ep
+
+
+def test_temperature_omitted_from_payload_by_default():
+    # Claude 4.7+ and Gemini reject temperature < 1 via the compat layer, so the
+    # default payload must carry no temperature at all.
+    seen = {}
+
+    def stub(url, payload, headers):
+        seen.update(payload)
+        return _resp(json.dumps(GOOD))
+
+    LLMClassifier("https://api.anthropic.com/v1/chat/completions", "claude-haiku-5-5",
+                  http_post=stub).classify(_meta(), "b")
+    assert "temperature" not in seen
+
+
+def test_temperature_included_when_explicitly_set():
+    seen = {}
+
+    def stub(url, payload, headers):
+        seen.update(payload)
+        return _resp(json.dumps(GOOD))
+
+    LLMClassifier("http://localhost:11434/", "m1", http_post=stub, temperature=0).classify(_meta(), "b")
+    assert seen.get("temperature") == 0

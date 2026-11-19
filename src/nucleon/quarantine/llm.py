@@ -66,6 +66,7 @@ class LLMClassifier:
         http_post: HttpPost | None = None,
         *,
         api_key: str | None = None,
+        temperature: float | None = None,
         max_response_bytes: int = DEFAULT_MAX_MODEL_RESPONSE_BYTES,
     ) -> None:
         # Accept either a base endpoint (``/v1/chat/completions`` is appended, e.g.
@@ -74,6 +75,7 @@ class LLMClassifier:
         base = endpoint.rstrip("/")
         self._url = base if base.endswith("/chat/completions") else f"{base}/v1/chat/completions"
         self._model = model
+        self._temperature = temperature
         self._max_response = max_response_bytes
         # R-007: the API key (when set) travels as a request header sourced from the
         # secret store, never from config or the URL. Keyless loopback needs none.
@@ -104,9 +106,13 @@ class LLMClassifier:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": self._user_message(meta, body_text)},
             ],
-            "temperature": 0,
             "stream": False,
         }
+        # Omitted by default: Claude 4.7+ and Gemini reject temperature < 1 via the
+        # OpenAI-compat layer. Set classifier.temperature only for a local model
+        # that wants deterministic sampling.
+        if self._temperature is not None:
+            payload["temperature"] = self._temperature
         response = self._http_post(self._url, payload, self._headers)
         try:
             content = response["choices"][0]["message"]["content"]
