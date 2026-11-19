@@ -41,9 +41,14 @@ Nachbau verlöre Know-how; Weg 3 „loser Vertrag" — Duplizierung, Drift.)
 
 ## Komponenten
 ### 1. `proton-drive-kit` (neues, geteiltes Paket — account-neutral)
-- **Access-Layer:** dünner Wrapper um die `proton-drive`-CLI (`list` / `download` /
-  `upload` / ggf. `mkdir`); hinter einem Interface, damit später andere Backends
-  (rclone o. Ä.) plugbar sind.
+- **Access-Layer (Zugriffs-Eigentümer — entschieden: Weg C, 2026-11-19):** das kit
+  **besitzt** den Drive-Zugriff als **Bibliothek**, kein Dienst/Daemon. Dünner
+  Wrapper um die `proton-drive`-CLI (`list` / `download` / `upload` / ggf. `mkdir`)
+  hinter einem Interface (später andere Backends / Drive-API plugbar); Keyring-/dbus-
+  Unlock und ein **konto-weiter Lock** (nur eine CLI-Operation je Konto gleichzeitig)
+  leben **einmal** hier. Beide Repos importieren das kit; weder SGB noch Nucleon
+  sprechen selbst mit der CLI. (Proton **Bridge ≠ Drive**: Nucleons Bridge-Zugriff ist
+  Mail-only; Drive ist neue Fähigkeit, die ohnehin CLI oder Drive-API braucht.)
 - **Scanner:** Verzeichnisbaum (oder Teilbereich) → Datei-Records
   (uid/pfad/größe/sha1/mtime/media/shared).
 - **Data-Map:** uid-basierter Index + Delta-Modell + Dubletten-Klassifikation +
@@ -54,13 +59,28 @@ Nachbau verlöre Know-how; Weg 3 „loser Vertrag" — Duplizierung, Drift.)
 - Config `drive.enabled: false`; bei an: Pfad zum CLI-Binary/Account, Schreib-
   Zielordner, erlaubter Lese-Teilbereich (Whitelist von Ordnern).
 - **`DriveStore`-Seam** (analog `MailStore`): list/read/write über das kit.
-- **Write-Use-Cases:** (a) Anhänge einer Mail ins konfigurierte Zielverzeichnis;
-  (b) **E-Mail-als-PDF** („Abdruck") rendern + ablegen. Ergebnis: eine **uid**,
-  die Nucleon **metadaten-only** (im Journal/Marker) referenziert — kein Inhalt.
-- **Attach-Use-Case:** Modell schlägt „hänge Datei X an" vor → das **Gate** löst den
-  Vorschlag **ausschließlich gegen die Data-Map im erlaubten Teilbereich** auf
-  (per uid/Pfad); Unbekanntes → `review_required`, nie automatisch angehängt
-  (gleiche Disziplin wie die Empfängergrenze R-009). Download → Anhang am Entwurf.
+- **Write-Use-Cases:** (a) Anhänge einer Mail speichern; (b) **E-Mail-als-PDF**
+  („Abdruck") rendern + ablegen. **Findbarkeit = Data-Map + Journal, nicht
+  Ordner-Gedächtnis:** jeder Schreibvorgang wird protokolliert (Quell-Mail → uid,
+  Ziel-Pfad, Name) und in der Data-Map geführt; du fragst „was hat Nucleon für Mail X
+  gespeichert und wohin", statt dir den Ordner zu merken. **Floor (immer): sprechende
+  Umbenennung** — `att0001.pdf` → `JJJJ-MM-TT_Kontext_Originalname`. Nucleon
+  referenziert nur **uid/Metadaten**, nie Inhalt.
+- **Platzierung (Schreibziel) — entschieden außer Modus:** immer in einen **begrenzten
+  Schreibbereich** (Whitelist). Modi (offen): **Eingang-Default** (ein `Nucleon/
+  Eingang`, du verteilst später; Map macht's auffindbar) vs. **Routing-Regeln** (opt-in,
+  deterministisch Kategorie/Absender/Label → thematischer Unterordner; Regeln legst
+  **du** fest, das Modell erfindet keinen Ordner). Freie Modell-Platzierung (Modell
+  liest Taxonomie, entscheidet selbst) **zurückgestellt** — Fehlablage ist der eine
+  Fehler, den die Map nachvollziehbar, aber nicht ungeschehen macht.
+- **Attach-Use-Case — entschieden 2026-11-19:** die **harte Grenze ist der freigegebene
+  Lese-Teilbereich** (Ordner-Whitelist; Default eng/explizit, per Config bis „alle"
+  weitbar). **Innerhalb** darf das Modell Dateien frei referenzieren (uid oder Name) →
+  kit löst **nur im Teilbereich** auf → Download → Anhang. **Außerhalb: unmöglich.**
+  Terminal-Backstop = die ohnehin vorhandene **menschliche Entwurfs-Prüfung**; Anhänge
+  werden dort **laut** gezeigt (Name + Pfad + „aus Drive"), weil der Prüfer den Datei-
+  *Inhalt* — anders als einen Empfänger-String — nicht mitliest. (Der Teilbereich ist
+  der R-009-Analog, nicht die Modell-Freiheit darin.)
 - **Data-Map-Scan:** Nucleon scannt einen konfigurierten Teilbereich → lokaler
   uid-Index (separater Store wie Marker/Journal).
 
@@ -71,28 +91,24 @@ SGB behält seine juristik-spezifische Nutzung; Nucleon seine Mail-Nutzung.
 
 ## Sicherheit & Datenschutz
 - **Gate als Grenze (lethal trifecta erweitert):** Drive ist zugleich **Datenquelle**
-  (Datei-Inhalte = untrusted, wenn extern) **und Schreib-/Exfil-Kanal**. Darum: das
-  Modell darf **nur** innerhalb eines **freigegebenen Schreib-Zielordners** schreiben
-  und **nur** aus einem **freigegebenen Lese-Teilbereich** anhängen; keine beliebige
-  Pfad-Navigation; Modell-Vorschläge gatebegrenzt.
+  (Datei-Inhalte = untrusted, wenn extern) **und Schreib-/Exfil-Kanal**. Die harten
+  Grenzen sind die **Ordner-Whitelists**: Schreiben nur in den **Schreibbereich**,
+  Anhängen nur aus dem **Lese-Teilbereich**; keine beliebige Pfad-Navigation.
+  **Innerhalb** der Whitelist darf das Modell frei wählen; die **menschliche
+  Entwurfs-Prüfung** (Anhänge laut gezeigt) ist der Terminal-Check — nicht eine
+  Einschränkung der Modell-Wahl innerhalb des erlaubten Bereichs.
 - **Datenminimierung:** Nucleons Zustand speichert nur **uid/Hash/Metadaten**, nie
   Datei-Inhalte; die Data-Map ist ein separater Store. **Sensible Pfad-/Dateinamen**
   (SGB-Befund R-012) beachten: ggf. opake uids nach außen, Namen nur lokal.
 
 ## Offen (nächste Runden — Owner/Design)
-- **Zugriffs-Eigentümerschaft (Schlüsselfrage, offen):** native CLI direkt pro
-  Konsument (A) vs. Nucleon als Proton-Zugriffs-*Dienst* (B) vs. **kit besitzt den
-  Zugriff als Bibliothek** (C, empfohlen). Wichtig: Proton **Bridge ≠ Drive** —
-  Nucleons heutiger Zugriff ist Mail-only (IMAP/SMTP via Bridge); Drive braucht
-  ohnehin die Drive-CLI oder die Drive-API, ist also neue Fähigkeit. C = Weg 1
-  präzisiert (CLI + Keyring/dbus + konto-weiter Lock einmal im kit, kein Daemon).
 - **kit-Repo/Name** (`Galil3o/proton-drive-kit`?), Lizenz, Sprache (Python, passend
   zu beiden).
 - **SGB-Migration jetzt oder später** (zuerst extrahieren, dann SGB umstellen?).
 - **E-Mail-als-PDF**: Rendering-Weg (welches Tool erzeugt den „Abdruck")?
 - **Data-Map-Format in Nucleon** (SGBs TSV wiederverwenden vs. JSON).
-- **Wie referenziert das Modell eine anzuhängende Datei** (uid / Name / semantisch)?
-- **Schreib-Zielordner + Namensschema**; OTS-Anker optional für Nucleon?
+- **Schreib-Platzierungsmodus:** Eingang-Default vs. Routing-Regeln (freie
+  Modell-Platzierung zurückgestellt); OTS-Anker optional für Nucleon?
 - **CLI-Auth/Setup** (dbus/keyring) für den Dauerbetrieb auf dem Cube.
 
 > Reihenfolge: nachrangig zum laufenden **v0.2-Live-Gang** (echtes Modell, Pilot).
