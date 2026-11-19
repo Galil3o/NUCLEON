@@ -31,6 +31,14 @@ EXIT_RUN_FAILURES = 3
 Deps = Callable[[Config], tuple[Any, Any, Any]]
 
 
+def make_tls_context(cfg: Config) -> ssl.SSLContext:
+    """TLS context for IMAP. Verification is never disabled; an optional
+    ``mail.tls_ca_file`` (e.g. the Proton Bridge CA) replaces the system CAs."""
+    if cfg.mail.tls_ca_file:
+        return ssl.create_default_context(cafile=cfg.mail.tls_ca_file)
+    return ssl.create_default_context()
+
+
 def build_default_deps(cfg: Config) -> tuple[Any, Any, Any]:
     """Wire the real adapters. Needs a live IMAP server; the password comes
     only from the NUCLEON_IMAP_PASSWORD environment variable."""
@@ -43,9 +51,8 @@ def build_default_deps(cfg: Config) -> tuple[Any, Any, Any]:
     if not password:
         raise RuntimeError("NUCLEON_IMAP_PASSWORD is not set")
     # Always use TLS so the password never travels in cleartext. Proton Bridge's
-    # self-signed cert may need a custom CA at live-acceptance time (deferred);
-    # verification is never disabled.
-    context = ssl.create_default_context()
+    # self-signed cert is trusted via mail.tls_ca_file; verification is never disabled.
+    context = make_tls_context(cfg)
     if cfg.mail.port == 993 or "ssl" in cfg.mail.mode.lower():
         conn = imaplib.IMAP4_SSL(cfg.mail.host, cfg.mail.port, ssl_context=context)
     else:
