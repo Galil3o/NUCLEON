@@ -1,0 +1,14 @@
+[project]
+name = "proton-drive-kit"
+version = "0.1.0"
+description = "Read a Proton Drive via its CLI: typed records, sha1 data-map (presence), BFS scanner."
+requires-python = ">=3.11"
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["proton_drive_kit*"]
