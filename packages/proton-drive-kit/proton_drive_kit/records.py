@@ -37,6 +37,7 @@ def _name_of(entry: dict) -> str:
 
 def parse_entry(entry: dict, parent_path: str = "") -> DriveRecord:
     name = _name_of(entry)
+    seg = name.replace("/", "∕")  # a name's '/' is not a path separator; neutralize it
     ar = entry.get("activeRevision") or {}
     digests = ar.get("claimedDigests") or {}
     size = entry.get("totalStorageSize")
@@ -47,7 +48,7 @@ def parse_entry(entry: dict, parent_path: str = "") -> DriveRecord:
         uid=entry.get("uid", ""),
         parent_uid=entry.get("parentUid"),
         name=name,
-        path=(f"{parent_path}/{name}" if parent_path else name),
+        path=(f"{parent_path}/{seg}" if parent_path else seg),
         is_folder=(entry.get("type") == "folder"),
         sha1=(digests.get("sha1") or None),
         sha1_verified=bool(digests.get("sha1Verified", False)),
@@ -66,4 +67,9 @@ def parse_listing(data, parent_path: str = "") -> list[DriveRecord]:
             raise ListingError(f"listing is not valid JSON: {e}") from e
     if not isinstance(data, list):
         raise ListingError("listing is not a JSON array of entries")
-    return [parse_entry(e, parent_path) for e in data]
+    out: list[DriveRecord] = []
+    for e in data:
+        if not isinstance(e, dict):
+            raise ListingError("listing element is not an object")
+        out.append(parse_entry(e, parent_path))
+    return out

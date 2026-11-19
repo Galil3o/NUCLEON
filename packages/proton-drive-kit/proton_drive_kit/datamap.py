@@ -30,7 +30,9 @@ class DataMap:
         paths = self.paths_for_sha1(sha1)
         if under is None:
             return paths
-        return [p for p in paths if p.startswith(under)]
+        base = under.rstrip("/")
+        prefix = base + "/"
+        return [p for p in paths if p == base or p.startswith(prefix)]
 
     def records(self) -> list[DriveRecord]:
         return list(self._records)
