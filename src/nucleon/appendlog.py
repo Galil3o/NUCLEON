@@ -10,6 +10,7 @@ fsynced.
 from __future__ import annotations
 
 import os
+from typing import Iterator
 
 try:  # POSIX advisory lock; absent on some platforms
     import fcntl
@@ -37,3 +38,25 @@ def append_line(path: str, line: str) -> None:
         os.fsync(fd)
     finally:
         os.close(fd)  # also releases the lock
+
+
+def read_lines(path: str) -> Iterator[str]:
+    """Yield the non-blank lines of a JSONL store, tolerating a torn UTF-8 line.
+
+    The file is read as bytes and split on ``b"\\n"``; each line is decoded on
+    its own, so a record cut off inside a multi-byte sequence loses only itself
+    instead of failing the whole read. Undecodable lines are skipped. A missing
+    file yields nothing.
+    """
+    try:
+        with open(path, "rb") as f:
+            data = f.read()
+    except FileNotFoundError:
+        return
+    for raw in data.split(b"\n"):
+        try:
+            line = raw.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if line.strip():
+            yield line

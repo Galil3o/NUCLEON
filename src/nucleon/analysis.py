@@ -23,7 +23,7 @@ from typing import Callable, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from nucleon.appendlog import append_line
+from nucleon.appendlog import append_line, read_lines
 from nucleon.quarantine import ClassifierOutputError
 
 FailedStage = Literal["fetch", "classify", "gate", "act"]
@@ -166,18 +166,15 @@ class Stage3Store:
         now = self._clock()
         keep: list[str] = []
         removed = 0
-        with open(self._path, encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                try:
-                    exp = datetime.fromisoformat(json.loads(line)["expires_at"])
-                except (ValueError, KeyError, TypeError):
-                    exp = now  # unreadable -> drop (fail toward deletion)
-                if exp <= now:
-                    removed += 1
-                else:
-                    keep.append(line if line.endswith("\n") else line + "\n")
+        for line in read_lines(self._path):
+            try:
+                exp = datetime.fromisoformat(json.loads(line)["expires_at"])
+            except (ValueError, KeyError, TypeError):
+                exp = now  # unreadable -> drop (fail toward deletion)
+            if exp <= now:
+                removed += 1
+            else:
+                keep.append(line + "\n")
         with open(self._path, "w", encoding="utf-8") as f:
             f.writelines(keep)
         return removed
