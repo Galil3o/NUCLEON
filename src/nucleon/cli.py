@@ -39,13 +39,29 @@ def make_tls_context(cfg: Config) -> ssl.SSLContext:
     return ssl.create_default_context()
 
 
+def build_classifier(cfg: Config):
+    """Construct the quarantined LLM classifier (provider seam).
+
+    The classifier speaks the OpenAI-compatible chat protocol, so the same seam
+    serves a local keyless model, Claude or Gemini. An API key (needed only for a
+    keyed/remote provider) comes ONLY from NUCLEON_CLASSIFIER_API_KEY — never from
+    config or the URL (R-007). A loopback keyless endpoint needs none.
+    """
+    from nucleon.quarantine.llm import LLMClassifier
+
+    return LLMClassifier(
+        cfg.classifier.endpoint, cfg.classifier.model,
+        api_key=os.environ.get("NUCLEON_CLASSIFIER_API_KEY"),
+        max_response_bytes=cfg.limits.max_model_response_bytes,
+    )
+
+
 def build_default_deps(cfg: Config) -> tuple[Any, Any, Any]:
     """Wire the real adapters. Needs a live IMAP server; the password comes
     only from the NUCLEON_IMAP_PASSWORD environment variable."""
     import imaplib
 
     from nucleon.mailstore.imap import ImapMailStore
-    from nucleon.quarantine.llm import LLMClassifier
 
     password = os.environ.get("NUCLEON_IMAP_PASSWORD")
     if not password:
@@ -65,10 +81,7 @@ def build_default_deps(cfg: Config) -> tuple[Any, Any, Any]:
         conn, account_hash, max_message_bytes=lim.max_message_bytes,
         max_body_bytes=lim.max_body_bytes, max_header_bytes=lim.max_header_bytes,
     )
-    classifier = LLMClassifier(
-        cfg.classifier.endpoint, cfg.classifier.model,
-        max_response_bytes=lim.max_model_response_bytes,
-    )
+    classifier = build_classifier(cfg)
     return store, classifier, build_journal(cfg.journal)
 
 

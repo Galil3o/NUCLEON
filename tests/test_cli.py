@@ -233,3 +233,18 @@ def _tls_cfg(ca):
         mail["tls_ca_file"] = ca
     return Config.model_validate({
         "mail": mail, "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"}})
+
+
+# -- provider-auth wiring: the classifier key comes only from the environment ----
+
+
+def test_build_classifier_uses_env_api_key_as_bearer(monkeypatch):
+    monkeypatch.setenv("NUCLEON_CLASSIFIER_API_KEY", "ENVKEY")
+    clf = cli.build_classifier(_tls_cfg(None))
+    assert clf._headers.get("Authorization") == "Bearer ENVKEY"
+
+
+def test_build_classifier_keyless_when_env_unset(monkeypatch):
+    monkeypatch.delenv("NUCLEON_CLASSIFIER_API_KEY", raising=False)
+    clf = cli.build_classifier(_tls_cfg(None))
+    assert "Authorization" not in clf._headers
