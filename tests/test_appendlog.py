@@ -109,3 +109,63 @@ def test_stage3_store_keeps_record_after_torn_record(tmp_path):
         except ValueError:
             pass
     assert [p["content"]["k"] for p in parsed] == ["v1", "v2"]
+
+
+# --- night-review #4: a torn MULTI-BYTE UTF-8 line must not block reads ---
+
+TORN_UTF8 = '{"ref_key": "ü'.encode("utf-8")[:-1]  # cut inside the 2-byte "ü"
+
+
+def _torn_utf8(path):
+    with open(path, "ab") as f:
+        f.write(TORN_UTF8)
+
+
+def test_read_lines_skips_undecodable_line_keeps_neighbours(tmp_path):
+    from nucleon.appendlog import read_lines
+    p = tmp_path / "x.jsonl"
+    p.write_bytes(b"one\n" + TORN_UTF8 + b"\ntwo\n\nthree")
+    assert list(read_lines(str(p))) == ["one", "two", "three"]
+    assert list(read_lines(str(tmp_path / "missing"))) == []
+
+
+def test_journal_reads_survive_torn_utf8_line(tmp_path):
+    path = tmp_path / "j.jsonl"
+    store = FileJournalStore(str(path))
+    store.append(make_entry("good"))
+    _torn_utf8(path)
+    store.append(make_entry("next"))
+    assert [e.ref_key for e in store.entries()] == ["good", "next"]
+
+
+def test_marker_reads_survive_torn_utf8_line(tmp_path):
+    path = tmp_path / "m.jsonl"
+    s = FileMarkerStore(str(path))
+    s.append(MarkerEntry(key="k1", status="ok", ts=TS))
+    _torn_utf8(path)
+    s.append(MarkerEntry(key="k2", status="ok", ts=TS))
+    assert [e.key for e in s.entries()] == ["k1", "k2"]
+
+
+def test_learned_reads_survive_torn_utf8_line(tmp_path):
+    path = tmp_path / "l.jsonl"
+    s = FileLearnedStore(str(path))
+    e1 = LearnedEntry(account_id="a", address="a@b.c", origin="o1", ts=TS)
+    e2 = LearnedEntry(account_id="a", address="d@e.f", origin="o2", ts=TS)
+    s.append(e1)
+    _torn_utf8(path)
+    s.append(e2)
+    assert s.entries() == [e1, e2]
+
+
+def test_stage3_purge_survives_torn_utf8_line(tmp_path):
+    now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    path = tmp_path / "s3.jsonl"
+    s = Stage3Store(str(path), verbose_enabled=True, clock=lambda: now)
+    c = Stage3Confirmation.explicit("a" * 16, ttl_seconds=60, now=now)
+    s.write(c, {"k": "v1"})
+    _torn_utf8(path)
+    s.write(c, {"k": "v2"})
+    assert s.purge_expired() == 0
+    contents = [json.loads(l)["content"]["k"] for l in path.read_text().splitlines()]
+    assert contents == ["v1", "v2"]

@@ -17,7 +17,7 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict
 
-from nucleon.appendlog import append_line
+from nucleon.appendlog import append_line, read_lines
 from nucleon.config import MarkerConfig
 from nucleon.models import DraftRef
 
@@ -57,14 +57,11 @@ class FileMarkerStore:
         if not os.path.exists(self._path):
             return []
         out: list[MarkerEntry] = []
-        with open(self._path, encoding="utf-8") as f:
-            for line in f:
-                if not line.strip():
-                    continue
-                try:
-                    out.append(MarkerEntry.model_validate_json(line))
-                except ValueError:
-                    continue  # tolerate a corrupt/partial line
+        for line in read_lines(self._path):
+            try:
+                out.append(MarkerEntry.model_validate_json(line))
+            except ValueError:
+                continue  # tolerate a corrupt/partial line
         return out
 
 

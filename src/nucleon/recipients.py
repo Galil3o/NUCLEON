@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Protocol
 from pydantic import BaseModel, ConfigDict
 
 from nucleon.addresses import normalize_address
-from nucleon.appendlog import append_line
+from nucleon.appendlog import append_line, read_lines
 from nucleon.models import MessageMeta, RecipientLine
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -54,13 +54,11 @@ class FileLearnedStore:
         if not os.path.exists(self._path):
             return []
         out: list[LearnedEntry] = []
-        with open(self._path, encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    try:
-                        out.append(LearnedEntry.model_validate_json(line))
-                    except ValueError:
-                        continue  # tolerate a corrupt/partial line
+        for line in read_lines(self._path):
+            try:
+                out.append(LearnedEntry.model_validate_json(line))
+            except ValueError:
+                continue  # tolerate a corrupt/partial line
         return out
 
 
