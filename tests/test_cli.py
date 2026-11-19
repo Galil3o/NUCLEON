@@ -1,6 +1,7 @@
 import pytest
 
 from nucleon import cli
+from nucleon.config import Config
 from nucleon.journal import NullJournal
 from nucleon.mailstore.fake import FakeMailStore
 from nucleon.models import Classification, MessageMeta, MessageRef
@@ -192,3 +193,43 @@ def test_r015_broken_yaml_is_config_error_exit_2(tmp_path, capsys, bad):
     err = capsys.readouterr().err
     assert "Traceback" not in err and "line" in err and "column" in err
     assert "SECRET-VALUE-XYZ" not in err and len(err) < 400  # no raw dump
+
+
+def test_tls_context_uses_system_cas_when_no_ca_file(monkeypatch):
+    import ssl
+
+    from nucleon import cli
+    calls = []
+    real = ssl.create_default_context
+    monkeypatch.setattr(cli.ssl, "create_default_context",
+                        lambda **kw: calls.append(kw) or real(**kw))
+    ctx = cli.make_tls_context(_tls_cfg(None))
+    assert calls == [{}]
+    assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+
+
+def test_tls_context_passes_configured_ca_file_and_keeps_verification(monkeypatch):
+    import ssl
+
+    from nucleon import cli
+    calls = []
+    sentinel = ssl.create_default_context()
+    monkeypatch.setattr(cli.ssl, "create_default_context",
+                        lambda **kw: calls.append(kw) or sentinel)
+    ctx = cli.make_tls_context(_tls_cfg("/path/to/bridge-ca.pem"))
+    assert calls == [{"cafile": "/path/to/bridge-ca.pem"}]
+    assert ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname
+
+
+def test_tls_context_with_missing_ca_file_fails_closed(tmp_path):
+    from nucleon import cli
+    with pytest.raises(OSError):
+        cli.make_tls_context(_tls_cfg(str(tmp_path / "nope.pem")))
+
+
+def _tls_cfg(ca):
+    mail = {"mode": "imap", "host": "h", "port": 2143, "username": "u", "id": "acct-1"}
+    if ca is not None:
+        mail["tls_ca_file"] = ca
+    return Config.model_validate({
+        "mail": mail, "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"}})

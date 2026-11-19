@@ -71,3 +71,30 @@ def test_r007_remote_https_requires_explicit_opt_in(ep):
 def test_r007_malformed_or_credentialed_endpoint_rejected(ep):
     with pytest.raises(ValidationError):
         _with_endpoint(ep, allow_remote=True)
+
+
+PROTON_EXAMPLE = Path(__file__).resolve().parent.parent / "config.proton.example.yaml"
+
+
+def test_tls_ca_file_defaults_to_none_and_validates():
+    base = {
+        "mail": {"mode": "imap", "host": "h", "port": 1, "username": "u", "id": "acct-1"},
+        "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
+    }
+    assert Config.model_validate(base).mail.tls_ca_file is None
+    base["mail"]["tls_ca_file"] = "/path/to/ca.pem"
+    assert Config.model_validate(base).mail.tls_ca_file == "/path/to/ca.pem"
+    base["mail"]["tls_ca_file"] = 5
+    with pytest.raises(ValidationError):
+        Config.model_validate(base)
+
+
+def test_proton_example_config_is_valid_and_bridge_shaped():
+    cfg = load_config(str(PROTON_EXAMPLE))
+    assert cfg.mail.port == 2143
+    assert cfg.mail.tls_ca_file == "/path/to/bridge-ca.pem"
+    assert cfg.labels.namespace == "Labels/"
+    assert cfg.draft.target == "drafts"
+    assert cfg.draft.label == "Labels/nucleon-proposed"
+    assert cfg.draft.create_missing_folders is True
+    assert "@" not in cfg.mail.username  # placeholder, no real address

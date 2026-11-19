@@ -1,0 +1,66 @@
+# Nucleon example configuration for Proton Mail via Proton Mail Bridge.
+# Placeholder values only; copy and edit locally. No secrets belong in this file.
+mail:
+  id: proton-main          # stable internal id (R-012): all state is bound to it, not the login.
+  accept_identity_change: false
+  mode: imap
+  host: 127.0.0.1          # Bridge listens on loopback only
+  port: 2143               # IMAP port shown in the Bridge settings (STARTTLS; Bridge default is 1143,
+                           # use whatever your Bridge reports)
+  username: your-bridge-username   # the Bridge-generated username; password comes from
+                                   # NUCLEON_IMAP_PASSWORD, never this file
+  # Bridge uses a self-signed certificate. Export it from Bridge (Settings -> Export TLS
+  # certificates) and point to the cert PEM here. Verification stays ON; it is never disabled.
+  tls_ca_file: /path/to/bridge-ca.pem
+  mailbox: INBOX
+  since_days: 7
+  limit: 50
+
+classifier:
+  endpoint: http://127.0.0.1:11434   # local model endpoint (default-allowed)
+  model: your-model-name
+  allow_remote: false
+
+# Proton has no free-form IMAP folders: every user container must live under
+# "Labels/" (labels) or "Folders/" (folders). A top-level label such as "nucleon/"
+# (the generic default) is INVALID on Proton, so the namespace and the draft label
+# below are both placed under "Labels/".
+draft:
+  target: drafts                         # Proton Bridge exposes a "Drafts" mailbox
+  label: "Labels/nucleon-proposed"
+  create_missing_folders: true           # create Labels/nucleon-proposed on first run if absent
+
+labels:
+  namespace: "Labels/"    # model labels are only honoured inside this namespace
+  allowed: []             # plus exact, operator-approved target folders (never system folders)
+
+cleanup:
+  auto_trash_enabled: false
+  auto_trash_categories: []
+
+marker:
+  backend: file
+  path: nucleon-state/processed.jsonl
+
+journal:
+  enabled: true           # needed for reconcile (sent / observed reply)
+  backend: file
+  path: nucleon-state/journal.jsonl
+
+analysis:
+  enabled: false
+  path: nucleon-state/analysis.jsonl
+  verbose: false
+  verbose_path: nucleon-state/analysis-stage3.jsonl
+  verbose_ttl_seconds: 900
+
+recipients:
+  mode: sender-only
+  contacts: []
+  own_addresses: []
+  learned_enabled: false
+  learned_path: nucleon-state/contacts-learned.jsonl
+  banner: true
+  banner_language: de
+
+registry_path: nucleon-state/accounts.json

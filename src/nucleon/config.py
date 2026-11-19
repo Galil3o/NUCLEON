@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import ipaddress
-from typing import Literal
+from typing import Literal, Optional
 from urllib.parse import urlsplit
 
 import yaml
@@ -35,6 +35,9 @@ class MailConfig(BaseModel):
     mailbox: str = "INBOX"
     since_days: int = 7
     limit: int = 50
+    # Optional PEM CA bundle to trust for the IMAP TLS handshake (e.g. Proton
+    # Bridge's self-signed cert). Verification stays ON either way. None = system CAs.
+    tls_ca_file: Optional[str] = None
 
 
     @field_validator("id")
