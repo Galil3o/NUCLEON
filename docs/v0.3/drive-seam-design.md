@@ -64,7 +64,7 @@ Nachbau verlöre Know-how; Weg 3 „loser Vertrag" — Duplizierung, Drift.)
   Ordner-Gedächtnis:** jeder Schreibvorgang wird protokolliert (Quell-Mail → uid,
   Ziel-Pfad, Name) und in der Data-Map geführt; du fragst „was hat Nucleon für Mail X
   gespeichert und wohin", statt dir den Ordner zu merken. **Floor (immer): sprechende
-  Umbenennung** — `att0001.pdf` → `JJJJ-MM-TT_Kontext_Originalname`. Nucleon
+  Umbenennung** — `att0001.pdf` → `JJJJMMTT_Kontext_Originalname` (ISO-Basisformat, ohne Trennstriche). Nucleon
   referenziert nur **uid/Metadaten**, nie Inhalt.
 - **Platzierung (Schreibziel) — entschieden außer Modus:** immer in einen **begrenzten
   Schreibbereich** (Whitelist). Modi (offen): **Eingang-Default** (ein `Nucleon/
@@ -81,6 +81,12 @@ Nachbau verlöre Know-how; Weg 3 „loser Vertrag" — Duplizierung, Drift.)
   werden dort **laut** gezeigt (Name + Pfad + „aus Drive"), weil der Prüfer den Datei-
   *Inhalt* — anders als einen Empfänger-String — nicht mitliest. (Der Teilbereich ist
   der R-009-Analog, nicht die Modell-Freiheit darin.)
+- **Lauf-Bericht (Drive-Schreibzugriff) — entschieden, Kanal offen:** ein Nucleon-Lauf
+  mit Drive-Schreibrecht gibt am Ende eine **menschenlesbare Zusammenfassung** „welche
+  Datei aus welcher Mail wohin abgelegt" (aus Journal/Map gespeist; Daten liegen ohnehin
+  vor). Als **Lauf-Digest**, nicht pro Datei. Kein GUI-Popup bei headless-Cube-Lauf —
+  realistische Kanäle: Bericht-Datei + stdout (Pull) und/oder Digest in die eigene
+  Mailbox (Push, nur bei Läufen mit Schreibzugriff).
 - **Data-Map-Scan:** Nucleon scannt einen konfigurierten Teilbereich → lokaler
   uid-Index (separater Store wie Marker/Journal).
 
@@ -109,6 +115,8 @@ SGB behält seine juristik-spezifische Nutzung; Nucleon seine Mail-Nutzung.
 - **Data-Map-Format in Nucleon** (SGBs TSV wiederverwenden vs. JSON).
 - **Schreib-Platzierungsmodus:** Eingang-Default vs. Routing-Regeln (freie
   Modell-Platzierung zurückgestellt); OTS-Anker optional für Nucleon?
+- **Lauf-Bericht-Kanal:** Bericht-Datei + stdout (Pull) vs. zusätzlich Mailbox-Digest
+  (Push, nur bei Schreib-Läufen).
 - **CLI-Auth/Setup** (dbus/keyring) für den Dauerbetrieb auf dem Cube.
 
 > Reihenfolge: nachrangig zum laufenden **v0.2-Live-Gang** (echtes Modell, Pilot).
