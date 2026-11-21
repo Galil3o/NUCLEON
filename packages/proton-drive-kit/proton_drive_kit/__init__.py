@@ -7,6 +7,12 @@ from proton_drive_kit.records import (
     parse_entry,
     parse_listing,
 )
+from proton_drive_kit.dedup import (
+    DedupDecision,
+    find_duplicate_groups,
+    plan_dedup,
+    summarize,
+)
 from proton_drive_kit.scanner import scan
 
 __all__ = [
@@ -19,4 +25,8 @@ __all__ = [
     "DriveAccessError",
     "Runner",
     "scan",
+    "DedupDecision",
+    "find_duplicate_groups",
+    "plan_dedup",
+    "summarize",
 ]
