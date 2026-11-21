@@ -4,10 +4,11 @@ from proton_drive_kit.records import DriveRecord
 LEGAL = ("/CASES",)
 
 
-def rec(path, sha1, size=10):
+def rec(path, sha1, size=10, uid=None):
     return DriveRecord(
-        uid=path, parent_uid=None, name=path.rstrip("/").rsplit("/", 1)[-1], path=path,
-        is_folder=False, sha1=sha1, sha1_verified=False, size=size, mtime=None,
+        uid=uid if uid is not None else path, parent_uid=None,
+        name=path.rstrip("/").rsplit("/", 1)[-1], path=path, is_folder=False,
+        sha1=sha1, sha1_verified=False, size=size, mtime=None,
         media_type=None, shared_by_url=False)
 
 
@@ -18,6 +19,8 @@ def folder(path):
         media_type=None, shared_by_url=False)
 
 
+# --- grouping / identity gate ---
+
 def test_find_groups_ignores_folders_singletons_and_no_sha1():
     recs = [rec("/a/x.pdf", "S"), rec("/b/y.pdf", "S"), rec("/c/z.pdf", "T"),
             folder("/d"), rec("/e/n.pdf", "")]
@@ -25,6 +28,34 @@ def test_find_groups_ignores_folders_singletons_and_no_sha1():
     assert set(groups) == {"S"}
     assert {r.path for r in groups["S"]} == {"/a/x.pdf", "/b/y.pdf"}
 
+
+def test_identity_gate_differing_size_not_grouped():
+    recs = [rec("/a/x.pdf", "S", size=10), rec("/b/x.pdf", "S", size=20)]
+    assert find_duplicate_groups(recs) == {}
+    assert plan_dedup(recs) == []
+
+
+def test_identity_gate_missing_size_not_grouped():
+    recs = [rec("/a/x.pdf", "S", size=None), rec("/b/x.pdf", "S", size=None)]
+    assert plan_dedup(recs) == []
+
+
+# --- input de-duplication / uid safety (K2) ---
+
+def test_repeated_record_collapsed_no_self_delete():
+    r = rec("/HR/a.pdf", "S")
+    assert plan_dedup([r, r]) == []
+
+
+def test_shared_uid_is_never_proposed_for_deletion():
+    r1 = rec("/A/x.pdf", "S", uid="U")
+    r2 = rec("/B/x.pdf", "S", uid="U")
+    [dec] = plan_dedup([r1, r2])
+    assert all(r.uid != dec.keep.uid for r in dec.delete)
+    assert all(r.uid != dec.keep.uid for r in dec.review)
+
+
+# --- decision branches ---
 
 def test_same_folder_exact_duplicates_high():
     recs = [rec("/HR/a.pdf", "S"), rec("/HR/a (1).pdf", "S"), rec("/HR/a (2).pdf", "S")]
@@ -43,12 +74,12 @@ def test_protect_keeps_legal_deletes_other_area():
     assert {r.path for r in dec.delete} == {"/PICTURES/doc.pdf"}
 
 
-def test_clear_copy_deletes_archive_keeps_original():
-    recs = [rec("/COMPANY/proj/report.pdf", "S"), rec("/COMPANY/0 ARCHIVE/report.pdf", "S")]
+def test_clear_copy_deletes_kopie_folder_medium():
+    recs = [rec("/COMPANY/proj/report.pdf", "S"), rec("/COMPANY/Kopie/report.pdf", "S")]
     [dec] = plan_dedup(recs)
-    assert dec.reason == "clear-copy"
+    assert dec.reason == "clear-copy" and dec.confidence == "medium"
     assert dec.keep.path == "/COMPANY/proj/report.pdf"
-    assert {r.path for r in dec.delete} == {"/COMPANY/0 ARCHIVE/report.pdf"}
+    assert {r.path for r in dec.delete} == {"/COMPANY/Kopie/report.pdf"}
 
 
 def test_intra_area_unprotected_medium():
@@ -72,14 +103,56 @@ def test_review_cross_area_without_protection_signal():
     assert dec.reason == "review"
 
 
-def test_review_group_still_deletes_same_folder_extras():
+# --- protected-area safety (W4 / W5) ---
+
+def test_legal_same_folder_extra_goes_to_review_not_delete():
     recs = [rec("/CASES/A/doc.pdf", "S"), rec("/CASES/A/doc (1).pdf", "S"),
             rec("/CASES/B/doc.pdf", "S")]
     [dec] = plan_dedup(recs, protect_prefixes=LEGAL)
     assert dec.reason == "review"
-    assert {r.path for r in dec.delete} == {"/CASES/A/doc (1).pdf"}
-    assert {r.path for r in dec.review} == {"/CASES/B/doc.pdf"}
+    assert dec.delete == ()  # CASES is never auto-deleted
+    assert {r.path for r in dec.review} == {"/CASES/A/doc (1).pdf", "/CASES/B/doc.pdf"}
 
+
+def test_clear_copy_within_protected_prefix_goes_to_review():
+    recs = [rec("/CASES/Fall/doc.pdf", "S"), rec("/CASES/Kopie/doc.pdf", "S")]
+    [dec] = plan_dedup(recs, protect_prefixes=LEGAL)
+    assert dec.reason == "review"
+    assert dec.delete == ()
+    assert {r.path for r in dec.review} == {"/CASES/Kopie/doc.pdf"}
+
+
+# --- copy heuristic conservatism (W3) ---
+
+def test_copy_regex_no_false_positive_on_archiv_party_name():
+    recs = [rec("/X/Archiv Mandant Müller/scan.pdf", "S"), rec("/Y/Projekt/scan.pdf", "S")]
+    [dec] = plan_dedup(recs)
+    assert dec.reason == "review"       # "Archiv Mandant" must NOT count as a copy
+    assert dec.delete == ()
+
+
+# --- parameter hygiene (N7 / N8 / prefix boundary) ---
+
+def test_empty_copy_pattern_string_is_ignored():
+    recs = [rec("/A/x.pdf", "S"), rec("/B/x.pdf", "S")]
+    [dec] = plan_dedup(recs, copy_patterns=("",))
+    assert dec.reason != "clear-copy"
+
+
+def test_protect_prefix_without_leading_slash_still_protects():
+    recs = [rec("/CASES/Fall/doc.pdf", "S"), rec("/PICTURES/doc.pdf", "S")]
+    [dec] = plan_dedup(recs, protect_prefixes=("CASES",))
+    assert dec.keep.path == "/CASES/Fall/doc.pdf"
+    assert {r.path for r in dec.delete} == {"/PICTURES/doc.pdf"}
+
+
+def test_protect_prefix_boundary_does_not_match_sibling():
+    recs = [rec("/CASESX/doc.pdf", "S"), rec("/PICTURES/doc.pdf", "S")]
+    [dec] = plan_dedup(recs, protect_prefixes=LEGAL)
+    assert dec.reason == "review"  # /CASESX is not under /CASES
+
+
+# --- reporting ---
 
 def test_summarize_counts_and_bytes():
     recs = [rec("/PICTURES/2020/p.jpg", "S", size=100), rec("/PICTURES/dup/p.jpg", "S", size=100),

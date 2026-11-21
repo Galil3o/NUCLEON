@@ -1,24 +1,29 @@
 """Dedup planning over DriveRecords.
 
-Turns duplicate groups (files sharing the same content sha1) into keep / delete /
-review decisions under configurable rules. Pure and read-only: it produces a plan
-and touches no Drive. Domain policy (which areas are protected, what counts as a
-"copy" location) is passed in as parameters, never hard-coded.
+Turns duplicate groups (files sharing the same content sha1 AND the same known size)
+into keep / delete / review decisions under configurable rules. Pure and read-only:
+it produces a plan and touches no Drive.
 
-Decision reasons, first match wins per group of distinct folders:
-  - "same-folder": the whole group lives in one folder -> keep one, delete the rest
-    (exact duplicates in one place; safe regardless of area).
-  - "protect": copies span a protected prefix (e.g. "/CASES") and unprotected
-    areas -> keep the protected one, delete the unprotected copies.
-  - "clear-copy": a copy sits in a copy-labelled location (Archive/Sent/Copy/...)
-    next to a non-copy original -> keep the original, delete the copy.
-  - "intra-area" (medium): all copies within one top-level area, none protected ->
-    keep the shortest path, delete the rest.
-  - "review" (low): anything else (e.g. several copies inside a protected area, or
-    cross-area with no protection signal) -> keep one, leave the rest for review.
+Safety design (this plan drives deletions on an irreplaceable archive):
+  - **Identity gate:** files count as duplicates only when sha1 AND size match and are
+    known. A sha1 is a *client-claimed* digest (``claimedDigests.sha1``, usually
+    unverified); requiring equal size guards against a wrong/collided hash conflating
+    two different files. Records without a size, or a sha1 whose group has differing
+    sizes, are never dedup candidates.
+  - **Input de-duplication:** records repeated in the listing (same uid+path) are
+    collapsed, and no record sharing the kept record's uid is ever proposed for
+    deletion — so an executor deleting by uid cannot remove the file we keep.
+  - **Protected areas are never auto-deleted:** any deletion candidate under a
+    ``protect_prefix`` (e.g. "/CASES") is moved to ``review`` instead of ``delete``.
+    Protected content only ever surfaces for human review.
+  - **Conservative copy heuristic:** only fairly unambiguous markers (Kopie/Copy/
+    .tmp/VF-DROP/autorecover) count as "copy" locations. Ambiguous terms like
+    "Archiv"/"Versand" are excluded (they appear in real case/party folder names);
+    add your own copy-dump folder names via ``copy_patterns`` if you want them.
 
-Extra copies in the SAME folder are always added to ``delete`` (exact duplicates),
-even inside a review group.
+Reasons (first match per group of distinct folders), then protected-safety filter:
+  same-folder (high) | protect (high) | clear-copy (medium) | intra-area (medium)
+  | review (low).
 """
 from __future__ import annotations
 
@@ -29,9 +34,7 @@ from typing import Iterable
 from proton_drive_kit.records import DriveRecord
 
 DEFAULT_COPY_PATTERNS: tuple[str, ...] = (
-    r"archiv", r"backup", r"kopie", r"\bcopy\b", r"versand", r"gesendet",
-    r"\bsent\b", r"outbox", r"papierkorb", r"trash", r"vf-?drop", r"duplikat",
-    r"recovery", r"autorecover",
+    r"\bkopie\b", r"\bcopy\b", r"copy_of", r"\.tmp$", r"autorecover", r"vf-?drop",
 )
 
 
@@ -59,15 +62,37 @@ def _top(path: str) -> str:
     return s.split("/", 1)[0] if s else ""
 
 
-def find_duplicate_groups(records: Iterable[DriveRecord]) -> dict[str, list[DriveRecord]]:
-    """Map content sha1 -> records sharing it, only for groups of 2+ files.
-    Folders and records without a sha1 are ignored."""
-    groups: dict[str, list[DriveRecord]] = {}
+def _unique(records: Iterable[DriveRecord]) -> list[DriveRecord]:
+    """Collapse records repeated in the listing (same uid+path)."""
+    seen: set[tuple[str, str]] = set()
+    out: list[DriveRecord] = []
     for r in records:
+        key = (r.uid, r.path)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(r)
+    return out
+
+
+def find_duplicate_groups(records: Iterable[DriveRecord]) -> dict[str, list[DriveRecord]]:
+    """Map content sha1 -> records sharing it, only for safe groups: 2+ files, all with
+    the SAME known size (identity gate). Folders and records without a sha1 are ignored;
+    a sha1 whose records disagree on size, or have an unknown size, is dropped."""
+    groups: dict[str, list[DriveRecord]] = {}
+    for r in _unique(records):
         if r.is_folder or not r.sha1:
             continue
         groups.setdefault(r.sha1, []).append(r)
-    return {s: rs for s, rs in groups.items() if len(rs) > 1}
+    out: dict[str, list[DriveRecord]] = {}
+    for sha1, recs in groups.items():
+        if len(recs) < 2:
+            continue
+        sizes = {r.size for r in recs}
+        if None in sizes or len(sizes) != 1:
+            continue  # unknown or conflicting size -> not a safe duplicate
+        out[sha1] = recs
+    return out
 
 
 def plan_dedup(
@@ -76,17 +101,17 @@ def plan_dedup(
     protect_prefixes: tuple[str, ...] = (),
     copy_patterns: tuple[str, ...] = DEFAULT_COPY_PATTERNS,
 ) -> list[DedupDecision]:
-    copy_re = re.compile("|".join(copy_patterns), re.IGNORECASE) if copy_patterns else None
-    prefixes = tuple(p.rstrip("/") for p in protect_prefixes)
+    copy_res = [re.compile(p, re.IGNORECASE) for p in copy_patterns if p]
+    prefixes = tuple("/" + p.strip("/") for p in protect_prefixes if p.strip("/"))
 
     def is_copy(path: str) -> bool:
-        return bool(copy_re) and any(copy_re.search(seg) for seg in path.strip("/").split("/"))
+        segs = path.strip("/").split("/")
+        return any(cr.search(seg) for seg in segs for cr in copy_res)
 
     def is_protected(path: str) -> bool:
         return any(path == pre or path.startswith(pre + "/") for pre in prefixes)
 
     def rank(r: DriveRecord) -> tuple:
-        # most canonical first: protected, then shortest path, then stable by path
         return (not is_protected(r.path), len(r.path), r.path)
 
     decisions: list[DedupDecision] = []
@@ -103,35 +128,54 @@ def plan_dedup(
             same_folder_delete.extend(ordered[1:])
 
         if len(reps) == 1:
-            decisions.append(DedupDecision(
-                sha1, reps[0], tuple(same_folder_delete), (), "same-folder", "high"))
-            continue
-
-        protected = [r for r in reps if is_protected(r.path)]
-        unprotected = [r for r in reps if not is_protected(r.path)]
-        copies = [r for r in reps if is_copy(r.path)]
-        noncopies = [r for r in reps if not is_copy(r.path)]
-        tops = {_top(r.path) for r in reps}
-
-        if protected and unprotected:
-            keep = sorted(protected, key=rank)[0]
-            delete = tuple(same_folder_delete) + tuple(unprotected)
-            review = tuple(r for r in protected if r is not keep)
-            decisions.append(DedupDecision(sha1, keep, delete, review, "protect", "high"))
-        elif noncopies and copies:
-            keep = sorted(noncopies, key=rank)[0]
-            delete = tuple(same_folder_delete) + tuple(copies)
-            review = tuple(r for r in noncopies if r is not keep)
-            decisions.append(DedupDecision(sha1, keep, delete, review, "clear-copy", "high"))
-        elif len(tops) == 1 and not protected:
-            keep = sorted(reps, key=rank)[0]
-            delete = tuple(same_folder_delete) + tuple(r for r in reps if r is not keep)
-            decisions.append(DedupDecision(sha1, keep, delete, (), "intra-area", "medium"))
+            keep = reps[0]
+            delete = list(same_folder_delete)
+            review: list[DriveRecord] = []
+            reason, confidence = "same-folder", "high"
         else:
-            keep = sorted(reps, key=rank)[0]
-            review = tuple(r for r in reps if r is not keep)
-            decisions.append(DedupDecision(
-                sha1, keep, tuple(same_folder_delete), review, "review", "low"))
+            protected = [r for r in reps if is_protected(r.path)]
+            unprotected = [r for r in reps if not is_protected(r.path)]
+            copies = [r for r in reps if is_copy(r.path)]
+            noncopies = [r for r in reps if not is_copy(r.path)]
+            tops = {_top(r.path) for r in reps}
+
+            if protected and unprotected:
+                keep = sorted(protected, key=rank)[0]
+                delete = list(same_folder_delete) + list(unprotected)
+                review = [r for r in protected if r is not keep]
+                reason, confidence = "protect", "high"
+            elif noncopies and copies:
+                keep = sorted(noncopies, key=rank)[0]
+                delete = list(same_folder_delete) + list(copies)
+                review = [r for r in noncopies if r is not keep]
+                reason, confidence = "clear-copy", "medium"
+            elif len(tops) == 1 and not protected:
+                keep = sorted(reps, key=rank)[0]
+                delete = list(same_folder_delete) + [r for r in reps if r is not keep]
+                review = []
+                reason, confidence = "intra-area", "medium"
+            else:
+                keep = sorted(reps, key=rank)[0]
+                delete = list(same_folder_delete)
+                review = [r for r in reps if r is not keep]
+                reason, confidence = "review", "low"
+
+        # Protected-safety: never auto-delete under a protect prefix -> move to review.
+        moved = [r for r in delete if is_protected(r.path)]
+        delete = [r for r in delete if not is_protected(r.path)]
+        review = review + moved
+
+        # Executor-by-uid safety: never propose deleting anything that shares the kept
+        # record's uid (a repeated node could otherwise take the kept file with it).
+        if keep.uid:
+            delete = [r for r in delete if r.uid != keep.uid]
+            review = [r for r in review if r.uid != keep.uid]
+
+        if not delete and review:
+            reason, confidence = "review", "low"
+
+        decisions.append(DedupDecision(
+            sha1, keep, tuple(delete), tuple(review), reason, confidence))
     return decisions
 
 
