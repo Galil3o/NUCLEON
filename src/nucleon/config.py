@@ -218,6 +218,18 @@ class RecipientsConfig(BaseModel):
         return out
 
 
+class PresenceCheckConfig(BaseModel):
+    """Attachment-presence check against the Drive DataMap. OFF by default: the
+    live attachment fetch it would drive is disk-sensitive and supervised."""
+
+    enabled: bool = False
+    under: str | None = None  # restrict the checked Drive subtree (None = whole map)
+
+
+class DriveConfig(BaseModel):
+    presence_check: PresenceCheckConfig = Field(default_factory=PresenceCheckConfig)
+
+
 class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -231,6 +243,7 @@ class Config(BaseModel):
     analysis: AnalysisConfig = Field(default_factory=AnalysisConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
     recipients: RecipientsConfig = Field(default_factory=RecipientsConfig)
+    drive: DriveConfig = Field(default_factory=DriveConfig)
     # R-012: where account id -> identity fingerprint (hashes only) is kept.
     registry_path: str = "nucleon-state/accounts.json"
 

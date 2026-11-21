@@ -20,5 +20,5 @@ nucleon = "nucleon.cli:cli"
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "packages/proton-drive-kit"]
 testpaths = ["tests"]
