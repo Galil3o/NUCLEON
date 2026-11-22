@@ -33,8 +33,8 @@ class MailConfig(BaseModel):
     port: int
     username: str
     mailbox: str = "INBOX"
-    since_days: int = 7
-    limit: int = 50
+    since_days: int = Field(default=7, ge=1)
+    limit: int = Field(default=50, ge=1)  # R-026: 0/negative would silently process nothing
     # Optional PEM CA bundle to trust for the IMAP TLS handshake (e.g. Proton
     # Bridge's self-signed cert). Verification stays ON either way. None = system CAs.
     tls_ca_file: Optional[str] = None

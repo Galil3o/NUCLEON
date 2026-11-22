@@ -98,3 +98,22 @@ def test_proton_example_config_is_valid_and_bridge_shaped():
     assert cfg.draft.label == "Labels/nucleon-proposed"
     assert cfg.draft.create_missing_folders is True
     assert "@" not in cfg.mail.username  # placeholder, no real address
+
+
+# --- R-026: a non-positive mail limit must be rejected (would silently check nothing) ---
+def _mail_cfg(**mail_extra):
+    return Config.model_validate({
+        "mail": {"mode": "imap", "host": "h", "port": 1, "username": "u", "id": "acct-1", **mail_extra},
+        "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
+    })
+
+
+@pytest.mark.parametrize("bad", [0, -1])
+def test_r026_non_positive_mail_limit_rejected(bad):
+    with pytest.raises(ValidationError):
+        _mail_cfg(limit=bad)
+
+
+def test_r026_smallest_valid_mail_limit_accepted():
+    assert _mail_cfg(limit=1).mail.limit == 1
+    assert _mail_cfg().mail.limit == 50
