@@ -58,6 +58,15 @@ def _label_allowed(label: str, cfg: Config, system: frozenset[str]) -> bool:
     return in_namespace or label in cfg.labels.allowed
 
 
+def _clean_subject(subject: str | None) -> str | None:
+    """v0.1-Audit: CR/LF (or other control chars) in a model-proposed draft subject
+    crash EmailMessage and abort execution. Strip them before the subject is staged."""
+    if subject is None:
+        return None
+    cleaned = "".join(c for c in subject if ord(c) >= 0x20 and ord(c) != 0x7F).strip()
+    return cleaned or None
+
+
 def decide(
     classification: Classification,
     meta: MessageMeta,
@@ -83,7 +92,7 @@ def decide(
         actions.append(
             StageDraft(
                 ref=meta.ref,
-                subject=classification.draft_subject or ("Re: " + meta.subject),
+                subject=_clean_subject(classification.draft_subject) or ("Re: " + meta.subject),
                 body=classification.draft_body,
                 to=", ".join(to_lines) if to_lines else None,
                 recipients=res.recipients,

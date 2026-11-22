@@ -30,7 +30,7 @@ class MailConfig(BaseModel):
     accept_identity_change: bool = False
     mode: str
     host: str
-    port: int
+    port: int = Field(ge=1, le=65535)  # v0.1-Audit: reject out-of-range ports
     username: str
     mailbox: str = "INBOX"
     since_days: int = Field(default=7, ge=1)

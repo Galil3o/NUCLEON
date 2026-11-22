@@ -245,7 +245,7 @@ def test_http_transport_reads_at_most_limit_plus_one(monkeypatch):
         return real_read(n)
 
     resp.read = spy  # type: ignore[method-assign]
-    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: resp)
+    monkeypatch.setattr("nucleon.quarantine.llm._OPENER.open", lambda req, timeout=0: resp)
     with pytest.raises(BudgetExceeded) as e:
         urllib_post("http://127.0.0.1:1/x", {}, max_bytes=100)
     assert e.value.kind == "model_response" and reads == [101]
@@ -253,14 +253,14 @@ def test_http_transport_reads_at_most_limit_plus_one(monkeypatch):
 
 def test_http_transport_rejects_by_content_length_without_reading(monkeypatch):
     resp = _Resp(b"{}", length=10_000_000)
-    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: resp)
+    monkeypatch.setattr("nucleon.quarantine.llm._OPENER.open", lambda req, timeout=0: resp)
     with pytest.raises(BudgetExceeded) as e:
         urllib_post("http://127.0.0.1:1/x", {}, max_bytes=100)
     assert e.value.observed == 10_000_000 and resp.tell() == 0
 
 
 def test_http_transport_small_response_ok(monkeypatch):
-    monkeypatch.setattr("urllib.request.urlopen", lambda req, timeout=0: _Resp(b'{"a": 1}'))
+    monkeypatch.setattr("nucleon.quarantine.llm._OPENER.open", lambda req, timeout=0: _Resp(b'{"a": 1}'))
     assert urllib_post("http://127.0.0.1:1/x", {}, max_bytes=100) == {"a": 1}
 
 
