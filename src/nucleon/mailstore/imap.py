@@ -443,6 +443,15 @@ class ImapMailStore:
             self._account, folder, validity, uid, str(mid).strip() if mid else None, mime_bytes
         )
 
+    @staticmethod
+    def _mailbox_arg(name: str) -> str:
+        """RFC 3501: imaplib does not quote COPY/MOVE mailbox arguments. An atom-safe
+        name is sent as-is; anything with a space or special char becomes a quoted
+        string (backslash and quote escaped) so it stays a single argument."""
+        if name and re.fullmatch(r"[A-Za-z0-9._/-]+", name):
+            return name
+        return '"' + name.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
     def set_label(self, ref: MessageRef, label: str) -> None:
         """Copy the message into the label folder (non-destructive).
 
@@ -452,9 +461,16 @@ class ImapMailStore:
         if label.casefold() in {n.casefold() for n in self.system_folders()}:
             raise ValueError("label resolves to a system/special folder")
         self._select_checked(ref)
-        _check(self._conn.uid("COPY", str(ref.uid), label), "COPY")
+        _check(self._conn.uid("COPY", str(ref.uid), self._mailbox_arg(label)), "COPY")
 
     def move_to_trash(self, ref: MessageRef) -> None:
         """Targeted, reversible UID MOVE (RFC 6851) to Trash; never expunges/purges."""
         self._select_checked(ref)
-        _check(self._conn.uid("MOVE", str(ref.uid), self._trash), "MOVE")
+        _check(self._conn.uid("MOVE", str(ref.uid), self._mailbox_arg(self._trash)), "MOVE")
+
+    def close(self) -> None:
+        """Best-effort logout so the CLI can release the connection in a finally."""
+        try:
+            self._conn.logout()
+        except Exception:
+            pass

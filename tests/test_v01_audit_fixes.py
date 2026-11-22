@@ -7,6 +7,7 @@ from pydantic import ValidationError
 from nucleon.config import Config
 from nucleon.gate import _clean_subject, decide
 from nucleon.models import Classification, MessageMeta, MessageRef, StageDraft
+from nucleon.mailstore.imap import ImapMailStore
 from nucleon.quarantine.llm import LLMClassifier, _NoRedirectHandler
 
 
@@ -64,3 +65,11 @@ def test_port_out_of_range_rejected(bad):
             "mail": {"mode": "imap", "host": "h", "port": bad, "username": "u", "id": "acct-1"},
             "classifier": {"endpoint": "http://127.0.0.1:1", "model": "m"},
         })
+
+
+# --- IMAP COPY/MOVE mailbox quoting (labels with spaces broke the command) ---
+def test_imap_mailbox_arg_quotes_only_when_needed():
+    q = ImapMailStore._mailbox_arg
+    assert q("nucleon/proposed") == "nucleon/proposed"   # atom-safe -> as-is
+    assert q("Labels/Work") == "Labels/Work"
+    assert q("Work Urgent") == '"Work Urgent"'            # space -> quoted string

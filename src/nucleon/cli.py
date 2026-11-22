@@ -115,6 +115,7 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
         print(f"nucleon: {exc}", file=sys.stderr)
         return EXIT_CONFIG
     exit_code = EXIT_OK
+    store = None
     try:
         store, classifier, journal = deps(cfg)
         if args.command == "run":
@@ -139,6 +140,13 @@ def main(argv: list[str], *, deps: Deps = build_default_deps) -> int:
     except Exception as exc:  # handled error: short message, no traceback
         print(f"nucleon: error: {exc}", file=sys.stderr)
         return EXIT_ERROR
+    finally:  # release the IMAP connection; best-effort, never masks the result
+        close = getattr(store, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:
+                pass
     return exit_code
 
 
