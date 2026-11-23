@@ -57,6 +57,8 @@ class PresenceLookup(Protocol):
     """Anything that can answer 'which Drive paths hold this content sha1?'.
 
     ``proton_drive_kit.datamap.DataMap.contains_sha1`` satisfies this structurally.
+    An optional ``has_digestless(under)`` lets the lookup report that the scope
+    contains files with no comparable digest (so a hash miss is inconclusive).
     """
 
     def contains_sha1(self, sha1: str, under: str | None = None) -> list[str]:
@@ -67,10 +69,11 @@ class PresenceLookup(Protocol):
 class AttachmentPresence:
     attachment: Attachment
     present_paths: tuple[str, ...]  # Drive paths holding the same content (scoped if `under`)
+    status: str = "absent"          # "present" | "absent" | "unknown"
 
     @property
     def present(self) -> bool:
-        return bool(self.present_paths)
+        return self.status == "present"
 
 
 def check_presence(
@@ -78,11 +81,23 @@ def check_presence(
     lookup: PresenceLookup,
     under: str | None = None,
 ) -> list[AttachmentPresence]:
-    """For each attachment, the Drive paths (optionally restricted to a subtree)
-    that already hold the same content by sha1. Read-only: no fetching, no writing.
-    An attachment with no sha1 is reported as not present."""
+    """For each attachment, a three-valued presence against the Drive (read-only):
+      - ``present``: at least one Drive path (optionally under a subtree) holds the
+        same content by sha1;
+      - ``unknown``: no sha1 match, but the scope contains files WITHOUT a comparable
+        digest (``lookup.has_digestless``) — the miss is inconclusive, so the caller
+        must not treat it as "safe to store a duplicate";
+      - ``absent``: no sha1 match and the scope is fully digest-comparable.
+    An attachment with no sha1 of its own can never match and is never ``present``."""
+    has_digestless = getattr(lookup, "has_digestless", None)
     results: list[AttachmentPresence] = []
     for att in attachments:
         paths = tuple(lookup.contains_sha1(att.sha1, under=under)) if att.sha1 else ()
-        results.append(AttachmentPresence(attachment=att, present_paths=paths))
+        if paths:
+            status = "present"
+        elif callable(has_digestless) and has_digestless(under):
+            status = "unknown"
+        else:
+            status = "absent"
+        results.append(AttachmentPresence(attachment=att, present_paths=paths, status=status))
     return results

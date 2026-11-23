@@ -89,6 +89,46 @@ def test_check_presence_under_scopes_subtree():
     assert res[0].present_paths == ("/CASES/Fall/x.pdf",)
 
 
+class FakeLookupD(FakeLookup):
+    """FakeLookup that also reports whether the scope has digest-less files."""
+
+    def __init__(self, mapping, digestless=False):
+        super().__init__(mapping)
+        self._digestless = digestless
+
+    def has_digestless(self, under=None):
+        return self._digestless
+
+
+def test_absent_without_digestless_is_definite_absent():
+    [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], FakeLookupD({}, digestless=False))
+    assert r.status == "absent" and r.present is False
+
+
+def test_absent_with_digestless_in_scope_is_unknown():
+    [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], FakeLookupD({}, digestless=True))
+    assert r.status == "unknown" and r.present is False and r.present_paths == ()
+
+
+def test_present_takes_precedence_over_digestless():
+    sha = _sha1(b"z")
+    [r] = check_presence([Attachment("x.pdf", sha, 1)],
+                         FakeLookupD({sha: ["/CASES/a.pdf"]}, digestless=True))
+    assert r.status == "present"
+
+
+def test_kit_datamap_digestless_file_yields_unknown():
+    datamap = pytest.importorskip("proton_drive_kit.datamap")
+    records = pytest.importorskip("proton_drive_kit.records")
+    dm = datamap.DataMap()
+    dm.add(records.DriveRecord(
+        uid="u", parent_uid=None, name="scan.pdf", path="/CASES/Fall/scan.pdf",
+        is_folder=False, sha1=None, sha1_verified=False, size=10, mtime=None,
+        media_type=None, shared_by_url=False))  # a Drive file with NO claimed sha1
+    [r] = check_presence([Attachment("scan.pdf", _sha1(b"whatever"), 7)], dm, under="/CASES")
+    assert r.status == "unknown"
+
+
 def test_kit_datamap_satisfies_presence_lookup():
     datamap = pytest.importorskip("proton_drive_kit.datamap")
     records = pytest.importorskip("proton_drive_kit.records")

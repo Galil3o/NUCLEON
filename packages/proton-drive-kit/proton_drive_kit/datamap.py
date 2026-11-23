@@ -34,6 +34,18 @@ class DataMap:
         prefix = base + "/"
         return [p for p in paths if p == base or p.startswith(prefix)]
 
+    def has_digestless(self, under: str | None = None) -> bool:
+        """Are there file records in scope that carry no sha1? A hash miss within
+        such a scope is inconclusive (the match could be one of these unindexed
+        files), so a presence check must report 'unknown' rather than 'absent'."""
+        base = under.rstrip("/") if under is not None else None
+        for r in self._records:
+            if r.is_folder or r.sha1:
+                continue
+            if base is None or r.path == base or r.path.startswith(base + "/"):
+                return True
+        return False
+
     def records(self) -> list[DriveRecord]:
         return list(self._records)
 
