@@ -151,3 +151,19 @@ def test_config_has_drive_presence_gate_off_by_default():
     drive = Config.model_fields["drive"].default_factory()
     assert drive.presence_check.enabled is False
     assert drive.presence_check.under is None
+
+
+def test_missing_has_digestless_capability_yields_unknown():
+    # R-021 edge (BOFH review of c402277): a lookup that cannot report digestless-
+    # ness cannot prove the scope is fully digest-comparable, so a hash miss must be
+    # 'unknown', never a definite 'absent'.
+    [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], FakeLookup({}))
+    assert r.status == "unknown" and r.present is False and r.present_paths == ()
+
+
+def test_attachment_without_own_digest_yields_unknown():
+    # R-021 edge (BOFH review of c402277): with no attachment digest the content
+    # cannot be compared at all, so the result is inconclusive ('unknown'), never
+    # 'absent' — even when the lookup positively reports a digest-comparable scope.
+    [r] = check_presence([Attachment("x.pdf", "", 0)], FakeLookupD({}, digestless=False))
+    assert r.status == "unknown" and r.present is False and r.present_paths == ()

@@ -84,20 +84,36 @@ def check_presence(
     """For each attachment, a three-valued presence against the Drive (read-only):
       - ``present``: at least one Drive path (optionally under a subtree) holds the
         same content by sha1;
-      - ``unknown``: no sha1 match, but the scope contains files WITHOUT a comparable
-        digest (``lookup.has_digestless``) — the miss is inconclusive, so the caller
-        must not treat it as "safe to store a duplicate";
-      - ``absent``: no sha1 match and the scope is fully digest-comparable.
-    An attachment with no sha1 of its own can never match and is never ``present``."""
+      - ``unknown``: the miss is inconclusive, so the caller must not treat it as
+        "safe to store a duplicate". This covers three cases: the attachment has no
+        digest of its own; the lookup cannot prove digest-comparable coverage (it has
+        no ``has_digestless``); or the scope contains files WITHOUT a comparable digest
+        (``lookup.has_digestless(under)`` is True);
+      - ``absent``: ONLY when the attachment has a valid sha1 AND the lookup positively
+        proves the scope is fully digest-comparable (``has_digestless`` exists and
+        returns False) and still holds no match.
+    An attachment with no sha1 of its own can never match and is never ``present``;
+    because its absence cannot be proven either, it is ``unknown``, never ``absent``."""
     has_digestless = getattr(lookup, "has_digestless", None)
+    can_prove_coverage = callable(has_digestless)
     results: list[AttachmentPresence] = []
     for att in attachments:
-        paths = tuple(lookup.contains_sha1(att.sha1, under=under)) if att.sha1 else ()
+        if not att.sha1:
+            # No digest on our side: the content cannot be compared, so absence can
+            # never be proven -> inconclusive (R-021 edge).
+            results.append(AttachmentPresence(attachment=att, present_paths=(), status="unknown"))
+            continue
+        paths = tuple(lookup.contains_sha1(att.sha1, under=under))
         if paths:
             status = "present"
-        elif callable(has_digestless) and has_digestless(under):
-            status = "unknown"
-        else:
+        elif can_prove_coverage and not has_digestless(under):
+            # The lookup positively reports the scope is fully digest-comparable and
+            # holds no match -> definitely absent.
             status = "absent"
+        else:
+            # Either the lookup cannot prove digest-comparable coverage (no
+            # ``has_digestless``), or the scope contains digestless files -> the miss
+            # is inconclusive, never a definite "absent" (R-021 edges).
+            status = "unknown"
         results.append(AttachmentPresence(attachment=att, present_paths=paths, status=status))
     return results
