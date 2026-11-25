@@ -167,3 +167,19 @@ def test_attachment_without_own_digest_yields_unknown():
     # 'absent' — even when the lookup positively reports a digest-comparable scope.
     [r] = check_presence([Attachment("x.pdf", "", 0)], FakeLookupD({}, digestless=False))
     assert r.status == "unknown" and r.present is False and r.present_paths == ()
+
+
+def test_malformed_attachment_sha1_yields_unknown():
+    # R-021 evidence boundary (BOFH review of 2ee1377): a non-empty but non-SHA1 value
+    # is not a comparable digest, so it must be 'unknown', never 'absent' — even with a
+    # lookup that positively reports a digest-comparable scope.
+    [r] = check_presence([Attachment("x.pdf", "not-a-sha1", 7)], FakeLookupD({}, digestless=False))
+    assert r.status == "unknown" and r.present is False and r.present_paths == ()
+
+
+def test_has_digestless_none_is_not_absence_proof():
+    # R-021 evidence boundary (BOFH review of 2ee1377): has_digestless() returning None
+    # is NOT positive proof of coverage; only an explicit False counts. A miss stays
+    # 'unknown'.
+    [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], FakeLookupD({}, digestless=None))
+    assert r.status == "unknown" and r.present is False

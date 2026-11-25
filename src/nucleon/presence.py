@@ -13,13 +13,23 @@ by ``config.drive.presence_check.enabled`` (OFF by default).
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass
 from email import message_from_bytes
 from typing import Protocol
 
+_SHA1_RE = re.compile(r"\A[0-9a-f]{40}\Z")
+
 
 def _sha1(data: bytes) -> str:
     return hashlib.sha1(data).hexdigest()
+
+
+def _is_valid_sha1(value: str) -> bool:
+    """True only for a well-formed lowercase 40-hex SHA-1 (what ``_sha1`` produces).
+    A non-empty but malformed value is not a comparable digest, so the caller treats it
+    as inconclusive rather than a basis for 'absent' (R-021 evidence boundary)."""
+    return bool(value) and _SHA1_RE.match(value) is not None
 
 
 @dataclass(frozen=True)
@@ -98,17 +108,17 @@ def check_presence(
     can_prove_coverage = callable(has_digestless)
     results: list[AttachmentPresence] = []
     for att in attachments:
-        if not att.sha1:
-            # No digest on our side: the content cannot be compared, so absence can
-            # never be proven -> inconclusive (R-021 edge).
+        if not _is_valid_sha1(att.sha1):
+            # No valid digest on our side (missing or malformed): the content cannot be
+            # compared, so absence can never be proven -> inconclusive (R-021 edge).
             results.append(AttachmentPresence(attachment=att, present_paths=(), status="unknown"))
             continue
         paths = tuple(lookup.contains_sha1(att.sha1, under=under))
         if paths:
             status = "present"
-        elif can_prove_coverage and not has_digestless(under):
-            # The lookup positively reports the scope is fully digest-comparable and
-            # holds no match -> definitely absent.
+        elif can_prove_coverage and has_digestless(under) is False:
+            # The lookup positively reports (explicit False, not None/truthy) that the
+            # scope is fully digest-comparable and holds no match -> definitely absent.
             status = "absent"
         else:
             # Either the lookup cannot prove digest-comparable coverage (no
