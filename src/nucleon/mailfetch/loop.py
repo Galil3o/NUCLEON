@@ -48,6 +48,13 @@ class Deleter(Protocol):
     def trash(self, folder: str, uid: str) -> None: ...
 
 
+class Recorder(Protocol):
+    # Make a durable record (e.g. a PDF-Abdruck) of the raw message BEFORE it is trashed.
+    # Returns an identifier/path for the record. Satisfied structurally by
+    # ``pipeline.abdruck.Abdruck``. The loop is pure: the record itself is the recorder's job.
+    def record(self, folder: str, uid: str, raw: bytes) -> str: ...
+
+
 @dataclass
 class FolderReport:
     folder: str
@@ -58,6 +65,7 @@ class FolderReport:
     already_present: int = 0
     kept_unknown: int = 0
     kept_no_attachments: int = 0
+    kept_no_abdruck: int = 0   # all accounted + delete requested, but the Abdruck failed/absent
     deleted: int = 0
     skipped_oversize: int = 0
     errors: int = 0
@@ -73,6 +81,7 @@ def process_folder(
     *,
     under: Optional[str] = None,
     do_delete: bool = False,
+    recorder: Optional[Recorder] = None,
 ) -> FolderReport:
     rep = FolderReport(folder=folder)
     refs = [Item(m.uid, m.size) for m in fetcher.list_messages(folder)]
@@ -83,11 +92,13 @@ def process_folder(
             continue
         assert isinstance(unit, Batch)
         for it in unit.items:
-            _process_one(folder, it, fetcher, lookup, stager, deleter, budget, under, do_delete, rep)
+            _process_one(folder, it, fetcher, lookup, stager, deleter, budget,
+                         under, do_delete, recorder, rep)
     return rep
 
 
-def _process_one(folder, it, fetcher, lookup, stager, deleter, budget, under, do_delete, rep):
+def _process_one(folder, it, fetcher, lookup, stager, deleter, budget, under,
+                 do_delete, recorder, rep):
     try:
         raw = fetcher.fetch_raw(folder, it.id)
     except Exception:
@@ -121,8 +132,20 @@ def _process_one(folder, it, fetcher, lookup, stager, deleter, budget, under, do
             else:  # unknown
                 all_accounted = False
         if all_accounted and do_delete and deleter is not None:
-            deleter.trash(folder, it.id)
-            rep.deleted += 1
+            # The original is destroyed (reversibly) only after a durable Abdruck of it
+            # exists. A recorder that is present but fails keeps the source untouched; the
+            # pipeline layer refuses to enable deletion without a recorder at all (fail-closed).
+            recorded = True
+            if recorder is not None:
+                try:
+                    recorder.record(folder, it.id, raw)
+                except Exception:
+                    rep.errors += 1
+                    rep.kept_no_abdruck += 1
+                    recorded = False
+            if recorded:
+                deleter.trash(folder, it.id)
+                rep.deleted += 1
         elif not all_accounted:
             rep.kept_unknown += 1
     finally:
