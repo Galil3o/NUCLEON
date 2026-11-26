@@ -91,6 +91,22 @@ def test_proton_uploader_raises_on_nonzero_rc():
         up(b"x", "a.pdf", INBOX)
 
 
+def test_proton_uploader_sanitizes_path_traversal_filename():
+    seen = {}
+    def fake_run(argv, **kw):
+        seen["argv"] = argv; return _Res(0)
+    up = ProtonDriveUploader(bin_path="/bin/pd", runner=fake_run)
+    path = up(b"x", "../../etc/passwd", INBOX)          # R-035b: reduced to one basename
+    assert seen["argv"][-2].endswith("/passwd") and "/.." not in seen["argv"][-2]
+    assert path == INBOX + "/passwd"
+
+
+def test_proton_uploader_defaults_blank_or_dotty_filename():
+    up = ProtonDriveUploader(bin_path="/bin/pd", runner=lambda *a, **k: _Res(0))
+    assert up(b"x", "", INBOX) == INBOX + "/attachment.bin"
+    assert up(b"x", "..", INBOX) == INBOX + "/attachment.bin"
+
+
 # ---------- integration with the mail loop ----------
 
 def _eml(fn, data):

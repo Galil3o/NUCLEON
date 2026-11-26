@@ -100,6 +100,31 @@ class FakeDeleter:
     def trash(self, folder, uid): self.trashed.append(uid)
 
 
+class FakeRecorder:
+    def __init__(self, fail=False): self.recorded = []; self._fail = fail
+    def record(self, folder, uid, raw):
+        if self._fail:
+            raise OSError("abdruck failed")
+        self.recorded.append(uid); return "/rec/" + uid + ".pdf"
+
+
+class OrderLog:
+    """Shared recorder+deleter proving the Abdruck is written before the trash (R-033)."""
+    def __init__(self): self.events = []
+    def record(self, folder, uid, raw): self.events.append(("record", uid)); return "/rec"
+    def trash(self, folder, uid): self.events.append(("trash", uid))
+
+
+class LyingFetcher:
+    """Announces one size in the listing but returns different bytes on fetch (R-036)."""
+    def __init__(self, uid, announced, raw):
+        self.uid = uid; self.announced = announced; self.raw = raw
+    def list_messages(self, folder):
+        return [MsgRef(self.uid, self.announced)]
+    def fetch_raw(self, folder, uid):
+        return self.raw
+
+
 class Lookup:
     """present: sha1 in mapping; else absent unless digestless -> unknown."""
     def __init__(self, present=(), digestless=False):
@@ -110,11 +135,17 @@ class Lookup:
         return self._dl
 
 
-def _run(msgs, lookup, stager=None, deleter=None, cap=10_000_000, do_delete=True):
+_DEFAULT = object()
+
+
+def _run(msgs, lookup, stager=None, deleter=None, cap=10_000_000, do_delete=True,
+         recorder=_DEFAULT):
     stager = stager or FakeStager()
     deleter = deleter or FakeDeleter()
+    if recorder is _DEFAULT:  # R-033: the delete path now needs a recorder to actually delete
+        recorder = FakeRecorder()
     rep = process_folder("INBOX", FakeFetcher(msgs), lookup, stager, deleter,
-                         DiskBudget(cap_bytes=cap), do_delete=do_delete)
+                         DiskBudget(cap_bytes=cap), do_delete=do_delete, recorder=recorder)
     return rep, stager, deleter
 
 
@@ -170,3 +201,43 @@ def test_oversize_message_skipped_not_fetched_to_budget():
     rep, stager, deleter = _run(msgs, Lookup(), cap=100)  # message far exceeds cap
     assert rep.skipped_oversize == 1 and rep.processed == 0 and rep.staged == 0
     assert rep.deleted == 0
+
+
+# ---------- R-033: delete requires an Abdruck at the executing boundary ----------
+
+def test_delete_without_recorder_keeps_source():
+    data = b"new-doc"
+    msgs = {"1": _eml([("a.pdf", data)])}
+    rep, stager, deleter = _run(msgs, Lookup(present=(), digestless=False), recorder=None)
+    assert rep.staged == 1 and rep.deleted == 0          # filed, but never deleted
+    assert rep.kept_no_abdruck == 1 and deleter.trashed == []
+
+
+def test_abdruck_failure_keeps_source():
+    data = b"new-doc"
+    msgs = {"1": _eml([("a.pdf", data)])}
+    rep, stager, deleter = _run(msgs, Lookup(present=(), digestless=False),
+                                recorder=FakeRecorder(fail=True))
+    assert rep.deleted == 0 and deleter.trashed == []
+    assert rep.kept_no_abdruck == 1 and rep.errors == 1
+
+
+def test_recorder_runs_before_trash():
+    data = b"new-doc"
+    msgs = {"1": _eml([("a.pdf", data)])}
+    log = OrderLog()
+    process_folder("INBOX", FakeFetcher(msgs), Lookup(present=(), digestless=False),
+                   FakeStager(), log, DiskBudget(cap_bytes=10_000_000),
+                   do_delete=True, recorder=log)
+    assert log.events == [("record", "1"), ("trash", "1")]   # Abdruck strictly before delete
+
+
+# ---------- R-036: the budget bites before the bytes are materialized ----------
+
+def test_actual_bytes_over_budget_after_fetch_skips():
+    # announced 10 (fits cap=100, so not SkipOversize at planning), but the real body is 200
+    raw = _eml([("big.bin", b"Z" * 200)])
+    f = LyingFetcher("1", announced=10, raw=raw)
+    rep = process_folder("INBOX", f, Lookup(), FakeStager(), FakeDeleter(),
+                         DiskBudget(cap_bytes=100), do_delete=False, recorder=FakeRecorder())
+    assert rep.skipped_oversize == 1 and rep.processed == 0 and rep.staged == 0

@@ -9,12 +9,21 @@ hashed, and each attachment checked for presence in the Drive:
   - ``unknown``  -> inconclusive; NOT staged, and the source message is kept.
 
 A source message is trashed (reversible) ONLY when every one of its attachments is
-accounted for (present or successfully staged) AND the run is in delete mode. A message
-with an ``unknown`` attachment, a staging error, or no attachments at all is kept — the
-original is never destroyed on an inconclusive or failed result.
+accounted for (present or successfully staged), the run is in delete mode, AND a durable
+Abdruck of the message has just been written. A message with an ``unknown`` attachment, a
+staging error, a missing/failed Abdruck, or no attachments at all is kept — the original is
+never destroyed on an inconclusive or failed result.
 
-All effects are injected (Fetcher/Stager/Deleter/PresenceLookup) so the loop is pure and
-unit-testable; nothing here talks to IMAP, the Drive, or the disk directly.
+Two hardening contracts are enforced here at the executing boundary (not only in the
+``pipeline`` layer):
+  - **R-033 — Abdruck-before-delete:** ``do_delete`` with no ``recorder`` never deletes; a
+    recorder that raises keeps the source. The guarantee does not depend on the caller.
+  - **R-036 — budget before fetch:** the working-set budget is reserved by the *announced*
+    size before the message is materialized, reconciled against the actual bytes, and each
+    decoded attachment's bytes are charged while it is staged.
+
+All effects are injected (Fetcher/Stager/Deleter/PresenceLookup/Recorder) so the loop is pure
+and unit-testable; nothing here talks to IMAP, the Drive, or the disk directly.
 """
 from __future__ import annotations
 
@@ -99,17 +108,28 @@ def process_folder(
 
 def _process_one(folder, it, fetcher, lookup, stager, deleter, budget, under,
                  do_delete, recorder, rep):
+    # R-036: reserve the working-set budget by the ANNOUNCED size BEFORE the message is
+    # fetched, so an oversized transfer is refused before it is materialized in memory/disk.
     try:
-        raw = fetcher.fetch_raw(folder, it.id)
-    except Exception:
-        rep.errors += 1
-        return
-    try:
-        budget.acquire(len(raw))
+        budget.acquire(it.size)
     except BudgetExceeded:
-        rep.skipped_oversize += 1  # couldn't hold it within the working set -> leave untouched
+        rep.skipped_oversize += 1
         return
+    acquired = it.size
     try:
+        try:
+            raw = fetcher.fetch_raw(folder, it.id)
+        except Exception:
+            rep.errors += 1
+            return
+        # R-036: reconcile the announced size against the real byte count on the same budget.
+        if len(raw) > acquired:
+            try:
+                budget.acquire(len(raw) - acquired)
+            except BudgetExceeded:
+                rep.skipped_oversize += 1
+                return
+            acquired = len(raw)
         blobs = extract_with_payload(raw)
         rep.processed += 1
         rep.attachments += len(blobs)
@@ -123,30 +143,40 @@ def _process_one(folder, it, fetcher, lookup, stager, deleter, budget, under,
             if ap.status == "present":
                 rep.already_present += 1
             elif ap.status == "absent":
+                # R-036: the decoded attachment is extra working set while it is staged;
+                # charge its bytes to the same budget, then release.
+                try:
+                    budget.acquire(blob.size)
+                except BudgetExceeded:
+                    rep.skipped_oversize += 1
+                    all_accounted = False
+                    continue
                 try:
                     stager.stage(blob.filename, blob.data, blob.sha1)
                     rep.staged += 1
                 except Exception:
                     rep.errors += 1
                     all_accounted = False
+                finally:
+                    budget.release(blob.size)
             else:  # unknown
                 all_accounted = False
         if all_accounted and do_delete and deleter is not None:
-            # The original is destroyed (reversibly) only after a durable Abdruck of it
-            # exists. A recorder that is present but fails keeps the source untouched; the
-            # pipeline layer refuses to enable deletion without a recorder at all (fail-closed).
-            recorded = True
-            if recorder is not None:
+            # R-033: deleting the original requires a durable Abdruck written FIRST, enforced
+            # here at the executing boundary. No recorder -> never delete; a recorder that
+            # raises -> keep the source. The guarantee does not rely on the caller.
+            if recorder is None:
+                rep.kept_no_abdruck += 1
+            else:
                 try:
                     recorder.record(folder, it.id, raw)
                 except Exception:
                     rep.errors += 1
                     rep.kept_no_abdruck += 1
-                    recorded = False
-            if recorded:
-                deleter.trash(folder, it.id)
-                rep.deleted += 1
+                else:
+                    deleter.trash(folder, it.id)
+                    rep.deleted += 1
         elif not all_accounted:
             rep.kept_unknown += 1
     finally:
-        budget.release(len(raw))
+        budget.release(acquired)

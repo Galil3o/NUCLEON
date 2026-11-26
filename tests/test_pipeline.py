@@ -62,8 +62,30 @@ def test_abdruck_builds_print_to_pdf_command(tmp_path):
     out = ab.record("INBOX", "42", _eml(None, b""))
     argv = seen["argv"]
     assert argv[0] == "/bin/chrome" and "--headless" in argv and "--no-sandbox" in argv
-    assert any(a == "--print-to-pdf=" + out for a in argv)
-    assert out == os.path.join(str(tmp_path), "42.pdf")
+    assert any(a.startswith("--user-data-dir=") for a in argv)   # R-035a: isolated profile
+    ptp = [a for a in argv if a.startswith("--print-to-pdf=")]
+    assert len(ptp) == 1 and ptp[0] != "--print-to-pdf=" + out   # writes to a temp, not final
+    assert out == os.path.join(str(tmp_path), "INBOX__42.pdf")    # R-034: keyed by folder+uid
+
+
+def test_abdruck_composite_key_avoids_uid_collision(tmp_path):
+    # R-034: the same UID in two different folders must NOT map to the same PDF.
+    ab = ChromiumAbdruck(out_dir=str(tmp_path), runner=lambda *a, **k: _Res(0))
+    a = ab.record("INBOX", "7", _eml(None, b""))
+    b = ab.record("Archive", "7", _eml(None, b""))
+    assert a != b and os.path.basename(a) == "INBOX__7.pdf" and os.path.basename(b) == "Archive__7.pdf"
+
+
+def test_abdruck_key_prefix_namespaces_account(tmp_path):
+    # R-034: the live adapter injects account/UIDVALIDITY via key_prefix.
+    ab = ChromiumAbdruck(out_dir=str(tmp_path), key_prefix="acct9-uv42", runner=lambda *a, **k: _Res(0))
+    out = ab.record("INBOX", "7", _eml(None, b""))
+    assert os.path.basename(out) == "acct9-uv42__INBOX__7.pdf"
+
+
+def test_html_record_blocks_scripts_and_external_fetches():
+    out = message_to_html(_eml(None, b"", html_body="<p>hi</p>"))
+    assert "Content-Security-Policy" in out and "default-src 'none'" in out
 
 
 def test_abdruck_raises_on_nonzero_rc(tmp_path):

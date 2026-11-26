@@ -43,7 +43,14 @@ class ProtonDriveUploader:
         self.tmpdir = tmpdir
 
     def __call__(self, data: bytes, filename: str, parent: str) -> str:
-        safe = filename or "attachment.bin"
+        # R-035b: the mail-supplied filename reaches a filesystem path and a CLI argument.
+        # Reduce it to a single validated basename so it cannot escape the temp dir or inject
+        # path segments. R-035c: the returned path is BEST-EFFORT — the provider may rename on
+        # a name clash (``-f rename``), so the archive decision must rest on content identity
+        # (the attachment sha1 checked by the presence lookup), never on this returned name.
+        safe = os.path.basename(filename or "")
+        if not safe or safe in (".", "..") or safe.startswith("."):
+            safe = "attachment.bin"
         d = tempfile.mkdtemp(dir=self.tmpdir)
         local = os.path.join(d, safe)
         try:

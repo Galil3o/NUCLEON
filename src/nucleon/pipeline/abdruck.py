@@ -82,12 +82,24 @@ def message_to_html(raw: bytes) -> str:
             )
     header_block = "<table>" + "".join(rows) + "</table><hr>"
     body = _best_body_html(msg)
+    # R-035a: a mail body is hostile input. A strict Content-Security-Policy keeps the Abdruck
+    # OFFLINE and inert — no scripts, no external fetches (images/fonts/styles/frames). Only
+    # inline styles and data: images render, so the record cannot phone home or load trackers.
+    csp = ("default-src 'none'; img-src data:; style-src 'unsafe-inline'; "
+           "font-src data:; base-uri 'none'; form-action 'none'")
     return (
         "<!doctype html><html><head><meta charset='utf-8'>"
+        f"<meta http-equiv='Content-Security-Policy' content=\"{csp}\">"
         "<style>body{font-family:sans-serif;font-size:11pt;margin:2em}"
         "pre{white-space:pre-wrap;word-wrap:break-word}</style></head>"
         f"<body>{header_block}{body}</body></html>"
     )
+
+
+def _safe_component(value: str, fallback: str) -> str:
+    """One filesystem-safe path component (no separators, no dotty names, bounded length)."""
+    cleaned = "".join(c for c in (value or "") if c.isalnum() or c in "-_") or fallback
+    return cleaned[:120]
 
 
 # --- live adapter ------------------------------------------------------------
@@ -96,27 +108,46 @@ def message_to_html(raw: bytes) -> str:
 class ChromiumAbdruck:
     """Render a message to PDF via headless Chromium's print-to-pdf.
 
-    ``out_dir`` receives ``<uid>.pdf``. ``runner`` is injected (default ``subprocess.run``)
-    so the argv can be asserted in tests without a browser. ``chromium_bin`` defaults to the
-    container's pre-installed Chromium; override for other hosts."""
+    R-034 — **stable identity**: the record is keyed by ``<key_prefix>__<folder>__<uid>.pdf``,
+    not by the UID alone, so two folders that happen to share a UID can never overwrite each
+    other's Abdruck. ``key_prefix`` is where the live adapter injects the account and
+    UIDVALIDITY (e.g. ``"<account>-<uidvalidity>"``), which are not visible to the pure loop.
+
+    R-034 — **durability**: every run writes a FRESH PDF to a private temp path, validates it
+    is non-empty, then atomically ``os.replace``\\s it into place — so a stale same-key file
+    can never satisfy a later run's existence check, and a half-written PDF is never published.
+
+    R-035a — **isolation**: a throwaway ``--user-data-dir`` per record and extensions disabled;
+    the CSP in the rendered HTML already blocks scripts and external fetches.
+
+    ``runner`` is injected (default ``subprocess.run``) so the argv is unit-testable without a
+    browser; ``chromium_bin`` defaults to the container's pre-installed Chromium."""
 
     out_dir: str
     chromium_bin: str = "/opt/pw-browsers/chromium"
     runner: Callable = subprocess.run
     timeout: int = 120
+    key_prefix: str = ""   # live adapter injects "<account>-<uidvalidity>" here
 
     def record(self, folder: str, uid: str, raw: bytes) -> str:
         os.makedirs(self.out_dir, exist_ok=True)
-        safe_uid = "".join(c for c in uid if c.isalnum() or c in "-_") or "msg"
-        out_pdf = os.path.join(self.out_dir, safe_uid + ".pdf")
+        name = "__".join(c for c in (
+            _safe_component(self.key_prefix, "") or None,
+            _safe_component(folder, "nofolder"),
+            _safe_component(uid, "msg"),
+        ) if c) + ".pdf"
+        out_pdf = os.path.join(self.out_dir, name)
         work = tempfile.mkdtemp()
+        profile = tempfile.mkdtemp()           # R-035a: isolated, throwaway browser profile
         in_html = os.path.join(work, "record.html")
+        tmp_pdf = os.path.join(work, "out.pdf")   # R-034: write fresh, then atomic-replace
         try:
             with open(in_html, "w", encoding="utf-8") as fh:
                 fh.write(message_to_html(raw))
             argv = [
                 self.chromium_bin, "--headless", "--no-sandbox", "--disable-gpu",
-                "--print-to-pdf-no-header", "--print-to-pdf=" + out_pdf,
+                "--disable-extensions", "--user-data-dir=" + profile,
+                "--print-to-pdf-no-header", "--print-to-pdf=" + tmp_pdf,
                 "file://" + in_html,
             ]
             res = self.runner(argv, capture_output=True, text=True, timeout=self.timeout)
@@ -124,12 +155,21 @@ class ChromiumAbdruck:
             if rc != 0:
                 raise OSError("chromium print-to-pdf failed rc=%s: %s"
                               % (rc, getattr(res, "stderr", "")))
-            # A runner that reports success but produced no file is still a failed record.
-            if self.runner is subprocess.run and not os.path.exists(out_pdf):
-                raise OSError("chromium reported success but no PDF was written")
+            # R-034: validate the output BEFORE it counts as a record. Only a live subprocess
+            # actually writes the file; an injected test runner is trusted for its argv.
+            if self.runner is subprocess.run:
+                if not os.path.exists(tmp_pdf) or os.path.getsize(tmp_pdf) == 0:
+                    raise OSError("chromium reported success but produced no/empty PDF")
+                os.replace(tmp_pdf, out_pdf)   # atomic publish
         finally:
-            try:
-                os.remove(in_html); os.rmdir(work)
-            except OSError:
-                pass
+            for p in (in_html, tmp_pdf):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            for d in (work, profile):
+                try:
+                    os.rmdir(d)
+                except OSError:
+                    pass
         return out_pdf

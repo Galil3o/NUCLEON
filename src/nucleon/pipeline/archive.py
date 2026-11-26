@@ -5,8 +5,9 @@ message, present/absent/unknown and (in delete mode) whether every attachment is
 for. This layer adds the cross-cutting rules the owner fixed for a LIVE connection:
 
   - **Deletion requires an Abdruck.** ``do_delete=True`` without a ``recorder`` is a
-    misconfiguration and is refused up front (fail-closed) — you cannot delete a source mail
-    unless a durable PDF record of it is being made first.
+    misconfiguration and is refused up front (fail-closed) here. R-033: the same guarantee is
+    ALSO enforced inside ``process_folder`` itself, so a direct loop call cannot delete without
+    a recorder either — this layer's early raise is the friendly check, not the only one.
   - **Default-off.** ``do_delete`` defaults to False: the pipeline caches→compares→files and
     keeps every original. Deletion is an explicit, separately-enabled step.
 
