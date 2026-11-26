@@ -27,9 +27,9 @@ def test_router_disabled_rule_is_ignored():
 
 
 def test_router_enabled_rule_matches():
-    r = Router(INBOX, [Rule("examplecase", "/my-files/CASES/ExampleCase",
-                            lambda m: "examplecase" in m.get("filename", "").lower(), enabled=True)])
-    assert r.target_for({"filename": "brief ExampleCase.docx"}) == "/my-files/CASES/ExampleCase"
+    r = Router(INBOX, [Rule("casematch", "/my-files/CASES/ExampleCase",
+                            lambda m: "example" in m.get("filename", "").lower(), enabled=True)])
+    assert r.target_for({"filename": "brief-example.docx"}) == "/my-files/CASES/ExampleCase"
     assert r.target_for({"filename": "other.pdf"}) == INBOX
 
 
