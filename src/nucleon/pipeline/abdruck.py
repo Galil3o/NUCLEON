@@ -16,14 +16,23 @@ documented TODO; the attachments themselves are preserved separately by the fili
 """
 from __future__ import annotations
 
+import hashlib
 import html
 import os
+import re
+import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from email import message_from_bytes
 from email.message import Message
 from typing import Callable, Optional, Protocol
+
+# Belt-and-suspenders on top of the CSP: strip tags the CSP does not cover in a file://
+# context — notably <meta http-equiv="refresh"> (navigation/redirect) and <script>.
+_STRIP_TAGS = re.compile(r"<\s*(script|meta|base|iframe|object|embed|link)\b[^>]*>",
+                         re.IGNORECASE)
+_STRIP_SCRIPT_BODY = re.compile(r"<\s*script\b.*?<\s*/\s*script\s*>", re.IGNORECASE | re.DOTALL)
 
 
 class Abdruck(Protocol):
@@ -61,7 +70,9 @@ def _best_body_html(msg: Message) -> str:
         except (LookupError, ValueError):
             text = payload.decode("utf-8", errors="replace")
         if ctype == "text/html":
-            return text  # rendered as-is by Chromium
+            # Neutralize redirecting/active tags the CSP can't catch via file://.
+            text = _STRIP_SCRIPT_BODY.sub("", text)
+            return _STRIP_TAGS.sub("", text)
         if ctype == "text/plain" and plain is None:
             plain = text
     if plain is not None:
@@ -131,16 +142,22 @@ class ChromiumAbdruck:
 
     def record(self, folder: str, uid: str, raw: bytes) -> str:
         os.makedirs(self.out_dir, exist_ok=True)
-        name = "__".join(c for c in (
+        base = "__".join(c for c in (
             _safe_component(self.key_prefix, "") or None,
             _safe_component(folder, "nofolder"),
             _safe_component(uid, "msg"),
-        ) if c) + ".pdf"
-        out_pdf = os.path.join(self.out_dir, name)
+        ) if c)
+        # A short hash of the RAW composite key disambiguates sanitizer collisions
+        # (e.g. folder "a/b" and "ab" both sanitize to "ab") so two distinct messages can
+        # never share a path.
+        keyhash = hashlib.sha1(
+            "\x00".join((self.key_prefix, folder, uid)).encode("utf-8", "replace")
+        ).hexdigest()[:10]
+        out_pdf = os.path.join(self.out_dir, base + "-" + keyhash + ".pdf")
+        tmp_pdf = out_pdf + ".tmp"   # same directory -> os.replace is atomic & never EXDEV
         work = tempfile.mkdtemp()
         profile = tempfile.mkdtemp()           # R-035a: isolated, throwaway browser profile
         in_html = os.path.join(work, "record.html")
-        tmp_pdf = os.path.join(work, "out.pdf")   # R-034: write fresh, then atomic-replace
         try:
             with open(in_html, "w", encoding="utf-8") as fh:
                 fh.write(message_to_html(raw))
@@ -160,16 +177,12 @@ class ChromiumAbdruck:
             if self.runner is subprocess.run:
                 if not os.path.exists(tmp_pdf) or os.path.getsize(tmp_pdf) == 0:
                     raise OSError("chromium reported success but produced no/empty PDF")
-                os.replace(tmp_pdf, out_pdf)   # atomic publish
+                os.replace(tmp_pdf, out_pdf)   # atomic, same-filesystem publish
         finally:
-            for p in (in_html, tmp_pdf):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
-            for d in (work, profile):
-                try:
-                    os.rmdir(d)
-                except OSError:
-                    pass
+            try:
+                os.remove(tmp_pdf)
+            except OSError:
+                pass
+            shutil.rmtree(work, ignore_errors=True)      # dirs hold files -> rmtree, not rmdir
+            shutil.rmtree(profile, ignore_errors=True)   # Chromium fills the profile dir
         return out_pdf

@@ -20,6 +20,19 @@ from nucleon.filing.router import Router
 Uploader = Callable[[bytes, str, str], str]
 
 
+def safe_filename(filename: str) -> str:
+    """One strict filesystem-safe basename: no separators, backslashes, NULs, control chars,
+    leading dot, or over-length (>255 bytes). R-035b."""
+    name = os.path.basename(filename or "").replace("\\", "_").replace("\x00", "")
+    name = "".join(c for c in name if ord(c) >= 0x20 and ord(c) != 0x7F).strip()
+    if not name or name in (".", "..") or name.startswith("."):
+        return "attachment.bin"
+    b = name.encode("utf-8")
+    if len(b) > 255:
+        name = b[:255].decode("utf-8", "ignore").strip() or "attachment.bin"
+    return name
+
+
 @dataclass
 class RoutingStager:
     router: Router
@@ -48,9 +61,11 @@ class ProtonDriveUploader:
         # path segments. R-035c: the returned path is BEST-EFFORT — the provider may rename on
         # a name clash (``-f rename``), so the archive decision must rest on content identity
         # (the attachment sha1 checked by the presence lookup), never on this returned name.
-        safe = os.path.basename(filename or "")
-        if not safe or safe in (".", "..") or safe.startswith("."):
-            safe = "attachment.bin"
+        if not isinstance(parent, str) or not parent.startswith("/"):
+            # An absolute Drive path can never be read as a CLI flag (no leading '-'), and
+            # can't inject path segments — this is the flag-injection guard for the parent arg.
+            raise ValueError("parent must be an absolute Drive path")
+        safe = safe_filename(filename)
         d = tempfile.mkdtemp(dir=self.tmpdir)
         local = os.path.join(d, safe)
         try:

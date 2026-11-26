@@ -107,6 +107,17 @@ def test_proton_uploader_defaults_blank_or_dotty_filename():
     assert up(b"x", "..", INBOX) == INBOX + "/attachment.bin"
 
 
+def test_proton_uploader_strips_backslash_nul_and_control():
+    up = ProtonDriveUploader(bin_path="/bin/pd", runner=lambda *a, **k: _Res(0))
+    assert up(b"x", "a\\b\x00\tc.pdf", INBOX) == INBOX + "/a_bc.pdf"
+
+
+def test_proton_uploader_rejects_non_absolute_parent():
+    up = ProtonDriveUploader(bin_path="/bin/pd", runner=lambda *a, **k: _Res(0))
+    with pytest.raises(ValueError):
+        up(b"x", "a.pdf", "-rf")            # not absolute -> flag/relative injection refused
+
+
 # ---------- integration with the mail loop ----------
 
 def _eml(fn, data):

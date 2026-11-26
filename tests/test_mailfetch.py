@@ -48,6 +48,17 @@ def test_budget_rejects_bad_cap():
         DiskBudget(cap_bytes=0)
 
 
+def test_budget_reserve_is_really_subtracted():
+    b = DiskBudget(cap_bytes=100, reserve_bytes=30)
+    assert b.effective_cap == 70 and b.available == 70
+    assert b.fits(70) and not b.fits(71) and b.too_large_ever(71)
+
+
+def test_budget_rejects_reserve_not_below_cap():
+    with pytest.raises(ValueError):
+        DiskBudget(cap_bytes=50, reserve_bytes=50)
+
+
 # ---------- batcher ----------
 
 def test_plan_batches_groups_under_cap_in_order():
@@ -64,6 +75,12 @@ def test_plan_batches_skips_oversize_and_flushes_current():
     assert isinstance(out[0], Batch) and [i.id for i in out[0].items] == ["a"]
     assert isinstance(out[1], SkipOversize) and out[1].item.id == "big"
     assert isinstance(out[2], Batch) and [i.id for i in out[2].items] == ["b"]
+
+
+def test_plan_batches_refuses_negative_size():
+    out = list(plan_batches([Item("a", 10), Item("neg", -3), Item("b", 10)], cap_bytes=70))
+    assert isinstance(out[1], SkipOversize) and out[1].item.id == "neg"
+    assert [i.id for i in out[0].items] == ["a"] and [i.id for i in out[2].items] == ["b"]
 
 
 # ---------- parse ----------

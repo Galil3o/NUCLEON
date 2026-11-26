@@ -17,7 +17,7 @@ class BudgetExceeded(Exception):
 @dataclass
 class DiskBudget:
     cap_bytes: int            # hard cap for the concurrent working set
-    reserve_bytes: int = 0    # headroom kept free below any external limit (informational)
+    reserve_bytes: int = 0    # headroom kept free below the cap; really subtracted (not just noted)
     _in_use: int = 0
 
     def __post_init__(self) -> None:
@@ -25,21 +25,28 @@ class DiskBudget:
             raise ValueError("cap_bytes must be > 0")
         if self.reserve_bytes < 0:
             raise ValueError("reserve_bytes must be >= 0")
+        if self.reserve_bytes >= self.cap_bytes:
+            raise ValueError("reserve_bytes must be < cap_bytes")
 
     @property
     def in_use(self) -> int:
         return self._in_use
 
     @property
+    def effective_cap(self) -> int:
+        """The usable cap after keeping the reserve free."""
+        return self.cap_bytes - self.reserve_bytes
+
+    @property
     def available(self) -> int:
-        return max(0, self.cap_bytes - self._in_use)
+        return max(0, self.effective_cap - self._in_use)
 
     def fits(self, n: int) -> bool:
         return 0 <= n <= self.available
 
     def too_large_ever(self, n: int) -> bool:
-        """A single object larger than the whole cap can never be staged -> skip it."""
-        return n > self.cap_bytes
+        """A single object larger than the usable cap can never be staged -> skip it."""
+        return n > self.effective_cap
 
     def acquire(self, n: int) -> None:
         if n < 0:

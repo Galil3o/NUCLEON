@@ -92,7 +92,8 @@ def decide(
         actions.append(
             StageDraft(
                 ref=meta.ref,
-                subject=_clean_subject(classification.draft_subject) or ("Re: " + meta.subject),
+                subject=(_clean_subject(classification.draft_subject)
+                         or _clean_subject("Re: " + meta.subject) or "Re:"),
                 body=classification.draft_body,
                 to=", ".join(to_lines) if to_lines else None,
                 recipients=res.recipients,

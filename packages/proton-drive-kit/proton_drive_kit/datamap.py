@@ -15,7 +15,9 @@ class DataMap:
         self._records.append(rec)
         if rec.is_folder or not rec.sha1:
             return
-        self._by_sha1.setdefault(rec.sha1, []).append(rec.path)
+        # Normalize to lowercase: a backend that reports sha1 in uppercase must still match an
+        # attachment's lowercase hexdigest(), otherwise a real match reads as a false 'absent'.
+        self._by_sha1.setdefault(rec.sha1.lower(), []).append(rec.path)
 
     def add_all(self, recs: Iterable[DriveRecord]) -> None:
         for r in recs:
@@ -24,7 +26,7 @@ class DataMap:
     def paths_for_sha1(self, sha1: str) -> list[str]:
         if not sha1:
             return []
-        return list(self._by_sha1.get(sha1, []))
+        return list(self._by_sha1.get(sha1.lower(), []))
 
     def contains_sha1(self, sha1: str, under: str | None = None) -> list[str]:
         paths = self.paths_for_sha1(sha1)

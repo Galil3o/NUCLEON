@@ -44,3 +44,13 @@ def test_add_all_and_records():
     m.add_all([rec("/a/1", "S"), rec("/a", None, is_folder=True)])
     assert len(m) == 1
     assert len(m.records()) == 2
+
+
+def test_sha1_lookup_is_case_insensitive():
+    # A backend that reports sha1 in uppercase must still match a lowercase hexdigest()
+    # (and vice versa) — otherwise a real hit reads as a false 'absent'.
+    up = "AABBCCDDEEFF00112233445566778899AABBCCDD"
+    m = DataMap(); m.add(rec("/x/a.pdf", up))
+    assert m.contains_sha1(up.lower()) == ["/x/a.pdf"]
+    m2 = DataMap(); m2.add(rec("/y/b.pdf", up.lower()))
+    assert m2.contains_sha1(up) == ["/y/b.pdf"]

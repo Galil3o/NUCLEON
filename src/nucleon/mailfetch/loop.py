@@ -95,7 +95,7 @@ def process_folder(
     rep = FolderReport(folder=folder)
     refs = [Item(m.uid, m.size) for m in fetcher.list_messages(folder)]
     rep.listed = len(refs)
-    for unit in plan_batches(refs, budget.cap_bytes):
+    for unit in plan_batches(refs, budget.effective_cap):
         if isinstance(unit, SkipOversize):
             rep.skipped_oversize += 1
             continue
@@ -174,9 +174,17 @@ def _process_one(folder, it, fetcher, lookup, stager, deleter, budget, under,
                     rep.errors += 1
                     rep.kept_no_abdruck += 1
                 else:
-                    deleter.trash(folder, it.id)
-                    rep.deleted += 1
+                    # A trash failure must not abort the folder; the Abdruck already exists and
+                    # the source is simply kept (never lost).
+                    try:
+                        deleter.trash(folder, it.id)
+                    except Exception:
+                        rep.errors += 1
+                    else:
+                        rep.deleted += 1
         elif not all_accounted:
             rep.kept_unknown += 1
+    except Exception:
+        rep.errors += 1   # one malformed message (parse/presence) must not abort the folder
     finally:
         budget.release(acquired)

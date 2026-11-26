@@ -36,7 +36,9 @@ def plan_batches(items: Iterable[Item], cap_bytes: int) -> Iterator[Union[Batch,
     cur: list = []
     cur_total = 0
     for it in items:
-        if it.size > cap_bytes:
+        # A negative size is corrupt metadata (never from a sane fetcher); refuse to batch it
+        # rather than let it distort the running total. Oversize items can never fit either.
+        if it.size < 0 or it.size > cap_bytes:
             if cur:
                 yield Batch(tuple(cur)); cur = []; cur_total = 0
             yield SkipOversize(it)
