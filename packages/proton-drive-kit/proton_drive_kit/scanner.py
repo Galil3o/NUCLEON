@@ -45,6 +45,9 @@ def scan(access, root: str, *, max_depth: int = 12) -> Iterator[ScanItem]:
     """Breadth-first walk from ``root``. Yields a :class:`DriveRecord` for every listed
     entry and a :class:`ScanIncomplete` for every folder whose subtree could not be
     (fully) walked. The root path itself is only listed, never yielded as a record."""
+    # Canonical root: "" and "/" both mean the tree root. Without this, scanning "" yields
+    # relative entry paths that never match an absolute "/" query (false 'absent').
+    root = root.rstrip("/") or "/"
     queue: list[tuple[str, int, str | None]] = [(root, 1, None)]
     visited: set[str] = set()
     while queue:

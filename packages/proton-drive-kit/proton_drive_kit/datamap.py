@@ -38,13 +38,16 @@ class DataMap:
         not be dropped, since they drive 'unknown' vs 'absent' in a presence check. Pass
         ``covered`` (the scan root[s]) to declare the positively-scanned scope — absence is
         only provable inside it."""
-        if covered is not None:
-            self.declare_covered(covered)
         for it in items:
             if isinstance(it, ScanIncomplete):
                 self._incomplete.append(it)
             else:
                 self.add(it)
+        # Declare coverage only AFTER the iterator is exhausted: a scan that aborts mid-way
+        # (the caller catches it and reuses the map) then leaves coverage undeclared, so a
+        # miss stays 'unknown' rather than a false 'absent'.
+        if covered is not None:
+            self.declare_covered(covered)
 
     def declare_covered(self, scope: "str | Iterable[str]") -> None:
         """Declare a positively-scanned scope (the scan root). Absence can only be proven

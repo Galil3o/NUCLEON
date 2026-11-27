@@ -90,3 +90,18 @@ def test_successfully_listed_empty_folder_is_not_incomplete():
     acc = FakeAccess({"/r": [drec("/r/empty", uid="UE")], "/r/empty": []})
     items = list(scan(acc, "/r"))
     assert [i for i in items if isinstance(i, ScanIncomplete)] == []
+
+
+def test_scan_empty_root_via_access_yields_absolute_paths():
+    # BOFH P2: scanning an empty root must canonicalize to "/" so entry paths are absolute and
+    # match a "/" query — not relative paths, which read as a false 'absent'.
+    import json
+    from proton_drive_kit.access import DriveAccess
+
+    def runner(abspath):
+        assert abspath == "/"   # "" canonicalized before listing
+        return json.dumps([{"uid": "u1", "name": "A", "type": "file",
+                            "activeRevision": {"claimedDigests": {"sha1": "a" * 40}}}])
+
+    recs = list(scan(DriveAccess(runner=runner), ""))
+    assert [r.path for r in recs] == ["/A"]

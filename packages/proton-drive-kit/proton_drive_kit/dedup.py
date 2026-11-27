@@ -106,6 +106,7 @@ def plan_dedup(
     protect_prefixes: tuple[str, ...] = (),
     copy_patterns: tuple[str, ...] = DEFAULT_COPY_PATTERNS,
 ) -> list[DedupDecision]:
+    records = list(records)  # materialized: scanned twice (digest grouping + protected-uid pass)
     copy_res = [re.compile(p, re.IGNORECASE) for p in copy_patterns if p]
     prefixes = tuple("/" + p.strip("/") for p in protect_prefixes if p.strip("/"))
     folded_prefixes = tuple(pre.casefold() for pre in prefixes)
@@ -123,6 +124,11 @@ def plan_dedup(
 
     def rank(r: DriveRecord) -> tuple:
         return (not is_protected(r.path), len(r.path), r.path)
+
+    # Protected uids are determined ONCE over ALL input paths, BEFORE any digest grouping:
+    # a uid whose protected path carries a different/absent digest would otherwise drop out
+    # of the duplicate group and stay deletable via its in-group path.
+    all_protected_uids = {r.uid for r in records if r.uid and is_protected(r.path)}
 
     decisions: list[DedupDecision] = []
     for sha1, recs in sorted(find_duplicate_groups(records).items()):
@@ -171,12 +177,12 @@ def plan_dedup(
                 reason, confidence = "review", "low"
 
         # Protected-safety: never auto-delete anything protected -> move to review. A uid is
-        # protected if ANY of its paths is protected: a shared node under a protect prefix
-        # must not become deletable via one of its other, unprotected paths.
-        protected_uids = {r.uid for r in recs if r.uid and is_protected(r.path)}
-
+        # protected if ANY of its INPUT paths is protected (all_protected_uids, computed once
+        # over all records before digest grouping): a shared node under a protect prefix must
+        # not become deletable via another path — even if its protected path has a different
+        # or absent digest and so is not in this duplicate group.
         def _protected(r):
-            return is_protected(r.path) or (r.uid and r.uid in protected_uids)
+            return is_protected(r.path) or (r.uid and r.uid in all_protected_uids)
 
         moved = [r for r in delete if _protected(r)]
         delete = [r for r in delete if not _protected(r)]

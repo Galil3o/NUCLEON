@@ -235,3 +235,14 @@ def test_protection_applies_across_all_paths_of_a_uid():
             rec("/PICTURES/s.pdf", "S", uid="US")]
     [dec] = plan_dedup(recs, protect_prefixes=LEGAL)
     assert all(r.uid != "US" for r in dec.delete)
+
+
+def test_protected_uid_whose_protected_path_is_outside_the_group_still_protects():
+    # BOFH P1: US's protected path (/CASES) carries a DIFFERENT digest ("T"), so it is not in
+    # the "S" duplicate group; US must still be protected at its in-group copy path — protected
+    # uids are gathered over ALL input paths, before digest grouping.
+    recs = [rec("/COMPANY/proj/r.pdf", "S", uid="UK"),
+            rec("/COMPANY/Kopie/r.pdf", "S", uid="US"),   # in the S group, a copy path
+            rec("/CASES/s.pdf", "T", uid="US")]            # protected, digest T -> not in S group
+    [dec] = plan_dedup(recs, protect_prefixes=LEGAL)
+    assert all(r.uid != "US" for r in dec.delete)

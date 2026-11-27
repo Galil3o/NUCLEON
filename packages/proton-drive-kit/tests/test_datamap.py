@@ -1,3 +1,5 @@
+import pytest
+
 from proton_drive_kit.records import DriveRecord
 from proton_drive_kit.datamap import DataMap
 from proton_drive_kit.scanner import ScanIncomplete
@@ -104,3 +106,17 @@ def test_query_outside_covered_scope_is_incomplete():
     assert m.coverage_incomplete("/Root/sub") is False     # within the scanned scope
     assert m.coverage_incomplete("/Other") is True         # never scanned -> unknown
     assert m.coverage_incomplete(None) is True             # a /Root scan does not prove the whole tree
+
+
+def test_coverage_not_declared_when_iterator_aborts():
+    # BOFH P2: coverage is declared only after a full successful iteration; an abort mid-scan
+    # leaves the partial map without a coverage claim, so a miss stays 'unknown', not 'absent'.
+    def _items():
+        yield rec("/Root/a.pdf", S1)
+        raise RuntimeError("scan aborted mid-way")
+
+    m = DataMap()
+    with pytest.raises(RuntimeError):
+        m.add_all(_items(), covered="/Root")
+    assert m.coverage_incomplete("/Root") is True
+    assert m.contains_sha1(S1) == ["/Root/a.pdf"]   # the pre-abort record is still indexed
