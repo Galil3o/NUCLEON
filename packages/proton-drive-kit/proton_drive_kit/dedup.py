@@ -170,23 +170,35 @@ def plan_dedup(
                 review = [r for r in reps if r is not keep]
                 reason, confidence = "review", "low"
 
-        # Protected-safety: never auto-delete under a protect prefix -> move to review.
-        moved = [r for r in delete if is_protected(r.path)]
-        delete = [r for r in delete if not is_protected(r.path)]
+        # Protected-safety: never auto-delete anything protected -> move to review. A uid is
+        # protected if ANY of its paths is protected: a shared node under a protect prefix
+        # must not become deletable via one of its other, unprotected paths.
+        protected_uids = {r.uid for r in recs if r.uid and is_protected(r.path)}
+
+        def _protected(r):
+            return is_protected(r.path) or (r.uid and r.uid in protected_uids)
+
+        moved = [r for r in delete if _protected(r)]
+        delete = [r for r in delete if not _protected(r)]
         review = review + moved
 
         # Executor-by-uid safety. An executor deletes by uid, so:
-        #  - a record sharing the kept file's uid is the kept file under a repeated node;
-        #    drop it from delete AND review.
+        #  - without a positively-identified keep (a uid), nothing can be distinguished from
+        #    the file to preserve -> propose NO deletions at all;
+        #  - a record sharing the kept file's uid is the kept file under a repeated node ->
+        #    drop it from delete AND review;
         #  - a delete candidate with no stable uid cannot be targeted without risking the
-        #    wrong file; surface it for review instead of auto-deleting.
-        if keep.uid:
+        #    wrong file -> surface it for review instead of auto-deleting.
+        if not keep.uid:
+            review = review + delete
+            delete = []
+        else:
             delete = [r for r in delete if r.uid != keep.uid]
             review = [r for r in review if r.uid != keep.uid]
-        uidless = [r for r in delete if not r.uid]
-        if uidless:
-            delete = [r for r in delete if r.uid]
-            review = review + uidless
+            uidless = [r for r in delete if not r.uid]
+            if uidless:
+                delete = [r for r in delete if r.uid]
+                review = review + uidless
 
         if not delete and review:
             reason, confidence = "review", "low"

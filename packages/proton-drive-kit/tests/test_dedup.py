@@ -213,3 +213,25 @@ def test_protect_case_insensitive_sibling_boundary_preserved():
     recs = [rec("/casesx/doc.pdf", "S"), rec("/PICTURES/doc.pdf", "S")]
     [dec] = plan_dedup(recs, protect_prefixes=("/CASES",))
     assert dec.reason == "review"
+
+
+# --- BOFH counter-check: keep-identity and uid-wide protection ---
+
+def test_no_delete_when_keep_has_no_uid():
+    # Without a positively-identified keep (a uid), an executor deleting by uid cannot be
+    # told which file to preserve -> propose no deletions at all.
+    recs = [rec("/HR/a.pdf", "S", uid=""), rec("/HR/a (1).pdf", "S", uid="UD")]
+    [dec] = plan_dedup(recs)
+    assert dec.keep.uid == ""
+    assert dec.delete == ()
+    assert {r.path for r in dec.review} == {"/HR/a (1).pdf"}
+
+
+def test_protection_applies_across_all_paths_of_a_uid():
+    # US appears at a protected (/CASES) and an unprotected (/PICTURES) path; it must never be
+    # a delete candidate at EITHER path — protection follows the uid, not just the one path.
+    recs = [rec("/COMPANY/k.pdf", "S", uid="UK"),
+            rec("/CASES/s.pdf", "S", uid="US"),
+            rec("/PICTURES/s.pdf", "S", uid="US")]
+    [dec] = plan_dedup(recs, protect_prefixes=LEGAL)
+    assert all(r.uid != "US" for r in dec.delete)
