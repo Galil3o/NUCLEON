@@ -54,6 +54,28 @@ index keys on, how it's rebuilt, durability); likely a reviewable draft (like
 
 ---
 
+## Producer-wiring · realize the honesty contract end-to-end
+
+**Status:** open; the next build step after the differ/DataMap contracts.
+The differ (`drive-increment`, PRIVATE_TOOLS) and the presence `DataMap` now **require** the
+map producer to declare what it scanned, else they conservatively report INCOMPLETE/unknown.
+The producer (the drive-scan → TSV / `DataMap` builder) must:
+- emit an `ERR` row for every `ScanIncomplete` marker the kit scanner yields (gaps), and
+- emit a root `COMPLETE` row (increment TSV) / call `add_all(covered=root)` (`DataMap`) when a
+  scan finishes, declaring the positively-covered scope.
+Until wired, REMOVED (differ) and `absent` (presence) never fire — safe, but not yet useful.
+Touches operational drive-scan tooling + live data → do under supervision, with live acceptance.
+
+---
+
+## main consolidation · gated on review
+
+**Status:** NEEDS-OWNER + a fresh BOFH pass on the latest `claude/v0.3-drive-seam` HEAD.
+Merge `claude/v0.2` and `claude/v0.3-drive-seam` cleanly to `main` and tag (v0.2.0 /
+v0.3.0-alpha) once the owner says go and the reviewer has re-checked the post-batch commits.
+
+---
+
 ## Notes (not open work)
 
 - Push-time "repository moved" notices are a harmless case redirect (`nucleon`→`NUCLEON`,
