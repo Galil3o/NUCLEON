@@ -64,7 +64,9 @@ def test_abdruck_builds_print_to_pdf_command(tmp_path):
     assert argv[0] == "/bin/chrome" and "--headless" in argv and "--no-sandbox" in argv
     assert any(a.startswith("--user-data-dir=") for a in argv)   # R-035a: isolated profile
     ptp = [a for a in argv if a.startswith("--print-to-pdf=")]
-    assert len(ptp) == 1 and ptp[0] == "--print-to-pdf=" + out + ".tmp"   # temp in out_dir, no EXDEV
+    assert len(ptp) == 1
+    tmp = ptp[0][len("--print-to-pdf="):]                         # unique temp in out_dir (R-034)
+    assert tmp.startswith(str(tmp_path)) and tmp.endswith(".pdf.tmp") and tmp != out
     base = os.path.basename(out)
     assert base.startswith("INBOX__42-") and base.endswith(".pdf")   # R-034: folder+uid+keyhash
     assert os.path.dirname(out) == str(tmp_path)

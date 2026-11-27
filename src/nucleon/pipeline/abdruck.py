@@ -154,7 +154,12 @@ class ChromiumAbdruck:
             "\x00".join((self.key_prefix, folder, uid)).encode("utf-8", "replace")
         ).hexdigest()[:10]
         out_pdf = os.path.join(self.out_dir, base + "-" + keyhash + ".pdf")
-        tmp_pdf = out_pdf + ".tmp"   # same directory -> os.replace is atomic & never EXDEV
+        # A UNIQUE temp per attempt (same dir -> os.replace atomic, never EXDEV). mkstemp makes
+        # a fresh 0-byte file, so a stale .tmp from a crashed prior run can never be mistaken
+        # for this run's output, and a silently-empty render is caught by the size check below
+        # (R-034 restart/stale-temp).
+        fd, tmp_pdf = tempfile.mkstemp(dir=self.out_dir, prefix=".abdruck-", suffix=".pdf.tmp")
+        os.close(fd)
         work = tempfile.mkdtemp()
         profile = tempfile.mkdtemp()           # R-035a: isolated, throwaway browser profile
         in_html = os.path.join(work, "record.html")

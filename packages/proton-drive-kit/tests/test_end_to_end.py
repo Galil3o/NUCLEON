@@ -1,5 +1,7 @@
 import proton_drive_kit as pdk
 
+SHA = "b" * 40
+
 
 def _frec(path, sha1):
     return pdk.DriveRecord(uid="u", parent_uid=None, name=path.rsplit("/", 1)[-1], path=path,
@@ -27,9 +29,9 @@ def test_public_api_exports():
 
 
 def test_scan_builds_datamap_and_finds_attachment():
-    acc = _Acc({"/r": [_drec("/r/case")], "/r/case": [_frec("/r/case/doc.pdf", "SHA")]})
+    acc = _Acc({"/r": [_drec("/r/case")], "/r/case": [_frec("/r/case/doc.pdf", SHA)]})
     m = pdk.DataMap()
     m.add_all(pdk.scan(acc, "/r"))
-    assert m.contains_sha1("SHA") == ["/r/case/doc.pdf"]
+    assert m.contains_sha1(SHA) == ["/r/case/doc.pdf"]
     assert m.contains_sha1("absent") == []
-    assert m.contains_sha1("SHA", under="/r/case") == ["/r/case/doc.pdf"]
+    assert m.contains_sha1(SHA, under="/r/case") == ["/r/case/doc.pdf"]

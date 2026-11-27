@@ -1,9 +1,19 @@
 """DataMap: indexes DriveRecords by claimed sha1 for the attachment-presence check."""
 from __future__ import annotations
 
+import re
 from typing import Iterable
 
 from proton_drive_kit.records import DriveRecord
+
+_SHA1_RE = re.compile(r"\A[0-9a-fA-F]{40}\Z")
+
+
+def _is_comparable_sha1(value) -> bool:
+    """A usable content digest is a well-formed 40-hex sha1. A missing OR format-invalid
+    provider digest is not comparable, so it must not be indexed and a hash miss against a
+    scope that holds such a record stays inconclusive (unknown), never 'absent' (R-021)."""
+    return bool(value) and _SHA1_RE.match(value) is not None
 
 
 class DataMap:
@@ -13,7 +23,7 @@ class DataMap:
 
     def add(self, rec: DriveRecord) -> None:
         self._records.append(rec)
-        if rec.is_folder or not rec.sha1:
+        if rec.is_folder or not _is_comparable_sha1(rec.sha1):
             return
         # Normalize to lowercase: a backend that reports sha1 in uppercase must still match an
         # attachment's lowercase hexdigest(), otherwise a real match reads as a false 'absent'.
@@ -42,7 +52,7 @@ class DataMap:
         files), so a presence check must report 'unknown' rather than 'absent'."""
         base = under.rstrip("/") if under is not None else None
         for r in self._records:
-            if r.is_folder or r.sha1:
+            if r.is_folder or _is_comparable_sha1(r.sha1):
                 continue
             if base is None or r.path == base or r.path.startswith(base + "/"):
                 return True

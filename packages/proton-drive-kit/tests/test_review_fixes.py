@@ -4,6 +4,8 @@ from proton_drive_kit.records import DriveRecord, parse_entry, parse_listing, Li
 from proton_drive_kit.datamap import DataMap
 from proton_drive_kit.access import DriveAccess, DriveAccessError
 
+H = "a" * 40          # a well-formed 40-hex digest (format-valid, so it is indexed)
+
 
 def _frec(path, sha1):
     return DriveRecord(uid="u", parent_uid=None, name=path.rsplit("/", 1)[-1], path=path,
@@ -14,16 +16,16 @@ def _frec(path, sha1):
 # Finding 1 — under= must scope by folder subtree, not raw string prefix.
 def test_under_scope_does_not_leak_to_sibling_prefix():
     m = DataMap()
-    m.add(_frec("/hr/Old/cv.pdf", "S"))
-    m.add(_frec("/hr/Older/cv.pdf", "S"))
-    assert m.contains_sha1("S", under="/hr/Old") == ["/hr/Old/cv.pdf"]
+    m.add(_frec("/hr/Old/cv.pdf", H))
+    m.add(_frec("/hr/Older/cv.pdf", H))
+    assert m.contains_sha1(H, under="/hr/Old") == ["/hr/Old/cv.pdf"]
 
 
 def test_under_scope_trailing_slash_is_equivalent():
     m = DataMap()
-    m.add(_frec("/hr/Old/cv.pdf", "S"))
-    m.add(_frec("/hr/Older/cv.pdf", "S"))
-    assert m.contains_sha1("S", under="/hr/Old/") == ["/hr/Old/cv.pdf"]
+    m.add(_frec("/hr/Old/cv.pdf", H))
+    m.add(_frec("/hr/Older/cv.pdf", H))
+    assert m.contains_sha1(H, under="/hr/Old/") == ["/hr/Old/cv.pdf"]
 
 
 # Finding 2 — a '/' in a name must not become a path separator (no spurious nesting).
