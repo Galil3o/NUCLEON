@@ -183,3 +183,65 @@ def test_has_digestless_none_is_not_absence_proof():
     # 'unknown'.
     [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], FakeLookupD({}, digestless=None))
     assert r.status == "unknown" and r.present is False
+
+
+class FakeLookupC(FakeLookupD):
+    """FakeLookupD that also reports whether the scanned coverage is incomplete."""
+
+    def __init__(self, mapping, digestless=False, incomplete=False):
+        super().__init__(mapping, digestless=digestless)
+        self._incomplete = incomplete
+
+    def coverage_incomplete(self, under=None):
+        return self._incomplete
+
+
+def test_absent_refused_when_coverage_incomplete():
+    # R-021 (reviewer: unvollständige Teilbaumerfassung): the scope is digest-comparable
+    # (has_digestless False) but a subtree was never scanned, so absence cannot be proven
+    # -> 'unknown', never 'absent'.
+    [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)],
+                         FakeLookupC({}, digestless=False, incomplete=True))
+    assert r.status == "unknown" and r.present is False and r.present_paths == ()
+
+
+def test_absent_still_definite_when_coverage_complete():
+    # Coverage proven complete AND digest-comparable AND no match -> definite absent.
+    [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)],
+                         FakeLookupC({}, digestless=False, incomplete=False))
+    assert r.status == "absent"
+
+
+def test_present_takes_precedence_over_incomplete_coverage():
+    sha = _sha1(b"z")
+    [r] = check_presence([Attachment("x.pdf", sha, 1)],
+                         FakeLookupC({sha: ["/d/a.pdf"]}, digestless=False, incomplete=True))
+    assert r.status == "present"
+
+
+def test_kit_scan_incomplete_subtree_yields_unknown():
+    # End-to-end honesty contract: scanner surfaces an un-scanned subtree, DataMap records
+    # it, and a presence miss inside that subtree reads 'unknown', never a false 'absent'.
+    scanner = pytest.importorskip("proton_drive_kit.scanner")
+    datamap = pytest.importorskip("proton_drive_kit.datamap")
+    records = pytest.importorskip("proton_drive_kit.records")
+    from proton_drive_kit.access import DriveAccessError
+
+    def _dir(path, uid):
+        return records.DriveRecord(
+            uid=uid, parent_uid=None, name=path.rsplit("/", 1)[-1], path=path,
+            is_folder=True, sha1=None, sha1_verified=False, size=None, mtime=None,
+            media_type=None, shared_by_url=False)
+
+    class Acc:
+        def list_dir(self, p):
+            if p == "/CASES":
+                return [_dir("/CASES/Locked", "ULOCK")]
+            if p == "/CASES/Locked":
+                raise DriveAccessError("boom")
+            return []
+
+    dm = datamap.DataMap()
+    dm.add_all(scanner.scan(Acc(), "/CASES"))
+    [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], dm, under="/CASES/Locked")
+    assert r.status == "unknown"

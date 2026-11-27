@@ -68,7 +68,9 @@ class PresenceLookup(Protocol):
 
     ``proton_drive_kit.datamap.DataMap.contains_sha1`` satisfies this structurally.
     An optional ``has_digestless(under)`` lets the lookup report that the scope
-    contains files with no comparable digest (so a hash miss is inconclusive).
+    contains files with no comparable digest, and an optional
+    ``coverage_incomplete(under)`` lets it report that part of the scope was never
+    scanned — either one makes a hash miss inconclusive.
     """
 
     def contains_sha1(self, sha1: str, under: str | None = None) -> list[str]:
@@ -101,11 +103,15 @@ def check_presence(
         (``lookup.has_digestless(under)`` is True);
       - ``absent``: ONLY when the attachment has a valid sha1 AND the lookup positively
         proves the scope is fully digest-comparable (``has_digestless`` exists and
-        returns False) and still holds no match.
+        returns False) AND the lookup does not report the scope as partly un-scanned
+        (``coverage_incomplete(under)`` is not True), and still holds no match.
     An attachment with no sha1 of its own can never match and is never ``present``;
-    because its absence cannot be proven either, it is ``unknown``, never ``absent``."""
+    because its absence cannot be proven either, it is ``unknown``, never ``absent``.
+    A scope that was only partly scanned (an un-walked subtree) can never yield a
+    definite ``absent``: the missing content could hide in the un-scanned region."""
     has_digestless = getattr(lookup, "has_digestless", None)
     can_prove_coverage = callable(has_digestless)
+    coverage_incomplete = getattr(lookup, "coverage_incomplete", None)
     results: list[AttachmentPresence] = []
     for att in attachments:
         if not _is_valid_sha1(att.sha1):
@@ -116,9 +122,11 @@ def check_presence(
         paths = tuple(lookup.contains_sha1(att.sha1, under=under))
         if paths:
             status = "present"
-        elif can_prove_coverage and has_digestless(under) is False:
+        elif (can_prove_coverage and has_digestless(under) is False
+              and not (callable(coverage_incomplete) and coverage_incomplete(under) is True)):
             # The lookup positively reports (explicit False, not None/truthy) that the
-            # scope is fully digest-comparable and holds no match -> definitely absent.
+            # scope is fully digest-comparable, AND does not report it as partly
+            # un-scanned, and holds no match -> definitely absent.
             status = "absent"
         else:
             # Either the lookup cannot prove digest-comparable coverage (no

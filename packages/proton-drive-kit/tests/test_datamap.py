@@ -1,5 +1,6 @@
 from proton_drive_kit.records import DriveRecord
 from proton_drive_kit.datamap import DataMap
+from proton_drive_kit.scanner import ScanIncomplete
 
 S1 = "1" * 40          # well-formed 40-hex digests (real sha1s are always this shape)
 S = "a" * 40
@@ -66,3 +67,22 @@ def test_format_invalid_sha1_not_indexed_and_counts_digestless():
     assert len(m) == 0
     assert m.has_digestless() is True
     assert m.contains_sha1("a" * 40) == []
+
+
+def test_add_all_captures_incomplete_scopes_for_coverage():
+    # An un-scanned (ScanIncomplete) region must be recorded so a presence check can
+    # report 'unknown' (not 'absent') for a miss inside it. Good records still index.
+    m = DataMap()
+    m.add_all([rec("/r/case/doc.pdf", S1),
+               ScanIncomplete(path="/r/locked", uid="UL", reason="list_error")])
+    assert m.contains_sha1(S1) == ["/r/case/doc.pdf"]
+    assert m.coverage_incomplete() is True                 # whole map
+    assert m.coverage_incomplete("/r/locked") is True       # the un-scanned folder itself
+    assert m.coverage_incomplete("/r/locked/sub") is True    # a query inside the un-scanned region
+    assert m.coverage_incomplete("/r/case") is False         # disjoint sibling: not forced unknown
+
+
+def test_coverage_complete_when_no_incomplete_markers():
+    m = DataMap(); m.add(rec("/a/x.pdf", S1))
+    assert m.coverage_incomplete() is False
+    assert m.coverage_incomplete("/a") is False

@@ -13,7 +13,7 @@ from proton_drive_kit.dedup import (
     plan_dedup,
     summarize,
 )
-from proton_drive_kit.scanner import scan
+from proton_drive_kit.scanner import scan, ScanIncomplete
 
 __all__ = [
     "DriveRecord",
@@ -25,6 +25,7 @@ __all__ = [
     "DriveAccessError",
     "Runner",
     "scan",
+    "ScanIncomplete",
     "DedupDecision",
     "find_duplicate_groups",
     "plan_dedup",
