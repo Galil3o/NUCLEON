@@ -22,7 +22,9 @@ _SHA1_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 
 
 def _sha1(data: bytes) -> str:
-    return hashlib.sha1(data).hexdigest()
+    # Content addressing (matches Proton Drive's claimed content sha1), not a security
+    # primitive: usedforsecurity=False documents that and permits FIPS environments.
+    return hashlib.sha1(data, usedforsecurity=False).hexdigest()
 
 
 def _is_valid_sha1(value: str) -> bool:

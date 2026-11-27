@@ -151,7 +151,8 @@ class ChromiumAbdruck:
         # (e.g. folder "a/b" and "ab" both sanitize to "ab") so two distinct messages can
         # never share a path.
         keyhash = hashlib.sha1(
-            "\x00".join((self.key_prefix, folder, uid)).encode("utf-8", "replace")
+            "\x00".join((self.key_prefix, folder, uid)).encode("utf-8", "replace"),
+            usedforsecurity=False,  # collision-disambiguation key, not a security primitive
         ).hexdigest()[:10]
         out_pdf = os.path.join(self.out_dir, base + "-" + keyhash + ".pdf")
         # A UNIQUE temp per attempt (same dir -> os.replace atomic, never EXDEV). mkstemp makes

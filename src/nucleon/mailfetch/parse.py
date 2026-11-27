@@ -35,7 +35,7 @@ def extract_with_payload(raw: bytes) -> list[AttachmentBlob]:
             continue
         out.append(AttachmentBlob(
             filename=filename or "",
-            sha1=hashlib.sha1(payload).hexdigest(),
+            sha1=hashlib.sha1(payload, usedforsecurity=False).hexdigest(),
             size=len(payload),
             data=payload,
         ))

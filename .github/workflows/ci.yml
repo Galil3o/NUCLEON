@@ -16,9 +16,11 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      # R-029: third-party actions are pinned to a commit SHA (supply-chain); the trailing
+      # comment names the release the SHA belongs to for readable dependabot updates.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Install
@@ -30,3 +32,19 @@ jobs:
       - name: Test drive-kit package
         run: pytest -q
         working-directory: packages/proton-drive-kit
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.13"
+      - name: Install bandit
+        run: pip install bandit
+      # R-030 (security half): fail CI on any medium-or-higher bandit finding in shipping
+      # code. Low-severity findings (asserts, controlled subprocess calls) are not gated;
+      # tests are not scanned. The ruff style/lint gate is tracked separately.
+      - name: Bandit security scan
+        run: bandit -r src/nucleon packages/proton-drive-kit/proton_drive_kit --severity-level medium
