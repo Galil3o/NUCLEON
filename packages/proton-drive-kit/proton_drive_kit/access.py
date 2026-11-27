@@ -1,10 +1,14 @@
 """Access layer: list a Proton Drive directory via the CLI, behind an injectable runner.
 
-The default runner shells out to the dbus/keyring wrapper script (empty-passphrase
-keyring); tests inject a fake runner and never touch a live Drive.
+The default runner shells out to a deployment-specific wrapper script (which handles the
+dbus/keyring unlock). That wrapper's path is NOT hardcoded in this package: configure it
+per deployment via the ``PROTON_DRIVE_LIST_WRAPPER`` environment variable or the
+``wrapper=`` argument, or bypass it entirely by injecting a ``runner=``. Tests inject a
+fake runner and never touch a live Drive.
 """
 from __future__ import annotations
 
+import os
 import subprocess
 from typing import Callable
 
@@ -12,7 +16,9 @@ from proton_drive_kit.records import DriveRecord, ListingError, parse_listing
 
 Runner = Callable[[str], str]
 
-DEFAULT_WRAPPER = "/home/claude/drive_list.sh"
+# The wrapper-script path is deployment-specific and must not be baked into this public
+# package. It is read from this environment variable when no explicit ``wrapper=`` is given.
+ENV_WRAPPER = "PROTON_DRIVE_LIST_WRAPPER"
 
 
 class DriveAccessError(Exception):
@@ -33,9 +39,23 @@ def _default_runner(wrapper: str) -> Runner:
     return run
 
 
+def _resolve_wrapper(wrapper: str | None) -> str:
+    w = wrapper or os.environ.get(ENV_WRAPPER)
+    if not w:
+        raise DriveAccessError(
+            "no Drive list wrapper configured: pass wrapper=..., inject a runner=..., or set "
+            f"the {ENV_WRAPPER} environment variable to the wrapper script path"
+        )
+    return w
+
+
 class DriveAccess:
-    def __init__(self, runner: Runner | None = None, *, wrapper: str = DEFAULT_WRAPPER) -> None:
-        self._runner: Runner = runner or _default_runner(wrapper)
+    def __init__(self, runner: Runner | None = None, *, wrapper: str | None = None) -> None:
+        # Fail closed: with no runner we need a configured wrapper path (arg or env), never
+        # a hardcoded guess at where the wrapper lives on some particular machine.
+        self._runner: Runner = (
+            runner if runner is not None else _default_runner(_resolve_wrapper(wrapper))
+        )
 
     def list_dir(self, abspath: str) -> list[DriveRecord]:
         try:
