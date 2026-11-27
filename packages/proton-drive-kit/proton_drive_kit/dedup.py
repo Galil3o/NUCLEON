@@ -91,6 +91,11 @@ def find_duplicate_groups(records: Iterable[DriveRecord]) -> dict[str, list[Driv
         sizes = {r.size for r in recs}
         if None in sizes or len(sizes) != 1:
             continue  # unknown or conflicting size -> not a safe duplicate
+        (only_size,) = tuple(sizes)
+        if only_size <= 0:
+            # Every empty file shares the empty-file sha1 AND size 0; grouping them would
+            # conflate unrelated files and reclaim nothing. Not a safe content duplicate.
+            continue
         out[sha1] = recs
     return out
 
@@ -103,13 +108,18 @@ def plan_dedup(
 ) -> list[DedupDecision]:
     copy_res = [re.compile(p, re.IGNORECASE) for p in copy_patterns if p]
     prefixes = tuple("/" + p.strip("/") for p in protect_prefixes if p.strip("/"))
+    folded_prefixes = tuple(pre.casefold() for pre in prefixes)
 
     def is_copy(path: str) -> bool:
         segs = path.strip("/").split("/")
         return any(cr.search(seg) for seg in segs for cr in copy_res)
 
     def is_protected(path: str) -> bool:
-        return any(path == pre or path.startswith(pre + "/") for pre in prefixes)
+        # Case-insensitive: folder-name casing must never defeat a protect prefix on an
+        # irreplaceable archive. Over-protection (more to review, fewer deletes) is the
+        # safe direction. Segment boundary is still honoured ('/casesx' is not '/cases').
+        p = path.casefold()
+        return any(p == pre or p.startswith(pre + "/") for pre in folded_prefixes)
 
     def rank(r: DriveRecord) -> tuple:
         return (not is_protected(r.path), len(r.path), r.path)
@@ -165,11 +175,18 @@ def plan_dedup(
         delete = [r for r in delete if not is_protected(r.path)]
         review = review + moved
 
-        # Executor-by-uid safety: never propose deleting anything that shares the kept
-        # record's uid (a repeated node could otherwise take the kept file with it).
+        # Executor-by-uid safety. An executor deletes by uid, so:
+        #  - a record sharing the kept file's uid is the kept file under a repeated node;
+        #    drop it from delete AND review.
+        #  - a delete candidate with no stable uid cannot be targeted without risking the
+        #    wrong file; surface it for review instead of auto-deleting.
         if keep.uid:
             delete = [r for r in delete if r.uid != keep.uid]
             review = [r for r in review if r.uid != keep.uid]
+        uidless = [r for r in delete if not r.uid]
+        if uidless:
+            delete = [r for r in delete if r.uid]
+            review = review + uidless
 
         if not delete and review:
             reason, confidence = "review", "low"

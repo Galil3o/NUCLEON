@@ -160,3 +160,56 @@ def test_summarize_counts_and_bytes():
     s = summarize(plan_dedup(recs, protect_prefixes=LEGAL))
     assert s["intra-area"]["delete"] == 1 and s["intra-area"]["bytes"] == 100
     assert s["same-folder"]["delete"] == 1 and s["same-folder"]["bytes"] == 5
+
+
+# --- 0-byte safety: empty files share one sha1+size and must NOT be dedup candidates ---
+
+def test_zero_byte_files_not_grouped_even_with_same_sha1():
+    EMPTY = "da39a3ee5e6b4b0d3255bfef95601890afd80709"  # sha1 of the empty file
+    recs = [rec("/a/x", EMPTY, size=0), rec("/b/y", EMPTY, size=0), rec("/c/z", EMPTY, size=0)]
+    assert find_duplicate_groups(recs) == {}   # 0 bytes reclaimable; unrelated empties
+    assert plan_dedup(recs) == []
+
+
+def test_zero_byte_does_not_touch_real_same_size_duplicates():
+    EMPTY = "da39a3ee5e6b4b0d3255bfef95601890afd80709"
+    recs = [rec("/z/a", EMPTY, size=0), rec("/z/b", EMPTY, size=0),
+            rec("/HR/r.pdf", "S", size=7), rec("/HR/r (1).pdf", "S", size=7)]
+    groups = find_duplicate_groups(recs)
+    assert set(groups) == {"S"}                 # only the real, non-empty duplicate survives
+
+
+# --- missing-uid safety: a delete-by-uid executor must never auto-delete a uid-less record ---
+
+def test_uidless_delete_candidate_goes_to_review_not_delete():
+    keep = rec("/HR/a.pdf", "S", uid="UK")
+    dup = rec("/HR/a (1).pdf", "S", uid="")     # no stable uid -> cannot be targeted safely
+    [dec] = plan_dedup([keep, dup])
+    assert dec.keep.uid == "UK"
+    assert all(r.uid for r in dec.delete)        # nothing uid-less in delete
+    assert {r.path for r in dec.review} == {"/HR/a (1).pdf"}
+
+
+def test_uidless_candidate_moved_to_review_even_when_keep_has_no_uid():
+    keep = rec("/HR/a.pdf", "S", uid="")
+    dup = rec("/PICTURES/a.pdf", "S", uid="")
+    decs = plan_dedup(keep and [keep, dup] or [])
+    [dec] = decs
+    assert all(r.uid for r in dec.delete)        # no uid-less record is ever an auto-delete
+
+
+# --- protection is case-insensitive (never let folder casing defeat a legal protect prefix) ---
+
+def test_protect_prefix_is_case_insensitive():
+    recs = [rec("/Cases/Fall/doc.pdf", "S"), rec("/PICTURES/doc.pdf", "S")]
+    [dec] = plan_dedup(recs, protect_prefixes=("/CASES",))
+    assert dec.reason == "protect"
+    assert dec.keep.path == "/Cases/Fall/doc.pdf"
+    assert {r.path for r in dec.delete} == {"/PICTURES/doc.pdf"}
+
+
+def test_protect_case_insensitive_sibling_boundary_preserved():
+    # casefolding must not over-match: /casesx is still NOT under /CASES
+    recs = [rec("/casesx/doc.pdf", "S"), rec("/PICTURES/doc.pdf", "S")]
+    [dec] = plan_dedup(recs, protect_prefixes=("/CASES",))
+    assert dec.reason == "review"
