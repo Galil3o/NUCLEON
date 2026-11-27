@@ -23,11 +23,53 @@ def _cfg(labels=None, **cleanup) -> Config:
     )
 
 
-def _meta(**kw) -> MessageMeta:
+def _meta(subject="Hello", from_addr="a@b.c", **kw) -> MessageMeta:
     ref = MessageRef.from_source("a", "INBOX", 1, 1, "<in@x>", b"raw")
     return MessageMeta(
-        ref=ref, subject="Hello", from_addr="a@b.c", to_addrs=["d@e.f"], **kw
+        ref=ref, subject=subject, from_addr=from_addr, to_addrs=["d@e.f"], **kw
     )
+
+
+def _cand(acts):
+    return [a for a in acts if isinstance(a, ApplyLabel) and a.label == "nucleon/trash-candidate"]
+
+
+def test_cleanup_off_by_default():
+    acts = decide(_cls(category="newsletter"), _meta(), _cfg(categories=["newsletter"]))
+    assert not any(isinstance(a, DeleteToTrash) for a in acts) and not _cand(acts)
+
+
+def test_cleanup_label_action_applies_candidate_label_not_trash():
+    cfg = _cfg(mode="category_only", action="label", categories=["newsletter"])
+    acts = decide(_cls(category="newsletter"), _meta(), cfg)
+    assert _cand(acts) and not any(isinstance(a, DeleteToTrash) for a in acts)
+
+
+def test_cleanup_category_and_rules_needs_the_rule_too():
+    cfg = _cfg(mode="category_and_rules", action="trash", categories=["newsletter"],
+               rules={"combine": "all",
+                      "conditions": [{"type": "from_domain_in", "values": ["ads.com"]}]})
+    # category matches but domain doesn't -> nothing
+    assert not any(isinstance(a, DeleteToTrash)
+                   for a in decide(_cls(category="newsletter"), _meta(from_addr="x@other.com"), cfg))
+    # category AND domain match -> trash
+    assert any(isinstance(a, DeleteToTrash)
+               for a in decide(_cls(category="newsletter"), _meta(from_addr="x@ads.com"), cfg))
+
+
+def test_cleanup_rules_combine_any():
+    cfg = _cfg(mode="category_and_rules", action="label", categories=["newsletter"],
+               rules={"combine": "any", "conditions": [
+                   {"type": "subject_contains", "values": ["sale"]},
+                   {"type": "from_domain_in", "values": ["ads.com"]}]})
+    assert not _cand(decide(_cls(category="newsletter"), _meta(subject="Hi", from_addr="x@o.com"), cfg))
+    assert _cand(decide(_cls(category="newsletter"), _meta(subject="Big SALE today", from_addr="x@o.com"), cfg))
+
+
+def test_cleanup_never_triggers_on_truncated_input():
+    cfg = _cfg(mode="category_only", action="trash", categories=["newsletter"])
+    acts = decide(_cls(category="newsletter"), _meta(), cfg, input_truncated=True)
+    assert not any(isinstance(a, DeleteToTrash) for a in acts)
 
 
 def _cls(**kw) -> Classification:
@@ -70,7 +112,7 @@ def test_no_draft_when_not_needed():
 
 
 def test_delete_to_trash_only_when_enabled_and_category_matches():
-    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    cfg = _cfg(mode="category_only", action="trash", categories=["newsletter"])
     assert any(
         isinstance(a, DeleteToTrash)
         for a in decide(_cls(category="newsletter"), _meta(), cfg)
@@ -82,7 +124,7 @@ def test_delete_to_trash_only_when_enabled_and_category_matches():
 
 
 def test_no_delete_when_cleanup_disabled():
-    cfg = _cfg(auto_trash_enabled=False, auto_trash_categories=["newsletter"])
+    cfg = _cfg(categories=["newsletter"])
     assert not any(
         isinstance(a, DeleteToTrash)
         for a in decide(_cls(category="newsletter"), _meta(), cfg)
@@ -105,12 +147,12 @@ def test_injection_text_in_fields_changes_nothing():
     acts = decide(c, _meta(message_id="<in@x>"), _cfg())
     assert [type(a) for a in acts] == [StageDraft]  # evil label is not in the namespace
     # even with cleanup on for other categories, the evil category isn't listed
-    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    cfg = _cfg(mode="category_only", action="trash", categories=["newsletter"])
     assert not any(isinstance(a, DeleteToTrash) for a in decide(c, _meta(), cfg))
 
 
 def test_gate_actions_are_within_allowed_set():
-    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["personal"])
+    cfg = _cfg(mode="category_only", action="trash", categories=["personal"])
     c = _cls(needs_reply=True, draft_body="b")
     acts = decide(c, _meta(message_id="<in@x>"), cfg)
     assert acts and all(isinstance(a, ALLOWED) for a in acts)

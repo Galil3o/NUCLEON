@@ -115,11 +115,44 @@ class DraftConfig(BaseModel):
     create_missing_folders: bool = False
 
 
-class CleanupConfig(BaseModel):
+class TrashCondition(BaseModel):
+    """One deterministic condition the gate checks over validated, typed fields (R-027).
+    Never free text the model controls."""
+
     model_config = ConfigDict(extra="forbid")
 
-    auto_trash_enabled: bool = False
-    auto_trash_categories: list[str] = Field(default_factory=list)
+    type: Literal["sender_in", "from_domain_in", "subject_contains", "category_in"]
+    values: list[str] = Field(default_factory=list)
+
+
+class TrashRules(BaseModel):
+    """A structured rule set (no free-form boolean parser): a flat list of conditions joined
+    by ONE top-level all/any. ``all`` over an empty list is True; ``any`` over empty is False."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    combine: Literal["all", "any"] = "all"
+    conditions: list[TrashCondition] = Field(default_factory=list)
+
+
+class CleanupConfig(BaseModel):
+    """R-027: configurable auto-cleanup policy on two orthogonal axes — a TRIGGER (what must
+    be true to act) and an ACTION (label vs. reversible trash). Default OFF; never permanent-
+    delete (trash = move to Trash). The gate also hard-skips a truncated classification input.
+
+    - ``mode``   : off | category_only | category_and_rules  (the trigger)
+    - ``action`` : label | trash                             (what happens when triggered)
+    - ``categories`` : the classifier categories that may trigger
+    - ``rules``  : extra deterministic conditions (only for ``category_and_rules``)
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["off", "category_only", "category_and_rules"] = "off"
+    action: Literal["label", "trash"] = "label"
+    categories: list[str] = Field(default_factory=list)
+    rules: TrashRules = Field(default_factory=TrashRules)
+    candidate_label: str = "nucleon/trash-candidate"
 
 
 class JournalConfig(BaseModel):

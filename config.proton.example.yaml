@@ -35,8 +35,8 @@ labels:
   allowed: []             # plus exact, operator-approved target folders (never system folders)
 
 cleanup:
-  auto_trash_enabled: false
-  auto_trash_categories: []
+  mode: "off"
+  categories: []
 
 marker:
   backend: file

@@ -26,8 +26,8 @@ draft:
   create_missing_folders: false   # preflight (R-010) blocks on a missing folder; true = create it
 
 cleanup:
-  auto_trash_enabled: false
-  auto_trash_categories: []
+  mode: "off"
+  categories: []
 
 labels:
   namespace: "nucleon/"   # model labels are only honoured inside this namespace

@@ -11,7 +11,7 @@ EXAMPLE = Path(__file__).resolve().parent.parent / "config.example.yaml"
 def test_load_example_config_is_valid():
     cfg = load_config(str(EXAMPLE))
     assert cfg.journal.enabled is False
-    assert cfg.cleanup.auto_trash_enabled is False
+    assert cfg.cleanup.mode == "off"
     assert cfg.draft.label == "nucleon/proposed"
     assert cfg.draft.target == "outbox"
 

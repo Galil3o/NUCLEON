@@ -73,7 +73,7 @@ def main() -> None:
                  "username": "me@example.com"},
         "classifier": {"endpoint": "http://127.0.0.1:1", "model": "demo"},
         "draft": {"target": "drafts", "label": "nucleon/proposed"},
-        "cleanup": {"auto_trash_enabled": True, "auto_trash_categories": ["newsletter"]},
+        "cleanup": {"mode": "category_only", "action": "trash", "categories": ["newsletter"]},
         "journal": {"enabled": True, "backend": "file", "path": journal_path},
         "marker": {"backend": "file", "path": os.path.join(tmp, "marker.jsonl")},
     })

@@ -62,7 +62,7 @@ def test_run_once_trashes_when_cleanup_enabled(tmp_path):
     store, j = FakeMailStore(), _journal(tmp_path)
     m = _meta()
     store.seed_inbox(m, "body")
-    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    cfg = _cfg(mode="category_only", action="trash", categories=["newsletter"])
     report = run_once(store, FakeClassifier(_cls(category="newsletter")), j, cfg, _marker(tmp_path))
     assert store.moved_to_trash == [m.ref]
     assert report.trashed == 1
@@ -209,7 +209,7 @@ def test_r002_changed_uidvalidity_is_vanished_not_acted_on(tmp_path):
     refs = store.list_window("INBOX", 7, 10)
     store.set_uidvalidity("INBOX", 2)  # server renumbered the folder after listing
     clf = FakeClassifier(_cls(needs_reply=True, draft_body="Thanks", category="newsletter"))
-    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    cfg = _cfg(mode="category_only", action="trash", categories=["newsletter"])
     report = run_once(store, clf, j, cfg, _marker(tmp_path))
     assert refs and report.vanished == 1 and report.errors == 0 and report.processed == 0
     assert store.appended_drafts == [] and store.labels == [] and store.moved_to_trash == []
@@ -228,7 +228,7 @@ def test_r002_stale_ref_during_actions_stops_further_actions(tmp_path):
         return got
 
     store.fetch_body = flip  # type: ignore[method-assign]
-    cfg = _cfg(auto_trash_enabled=True, auto_trash_categories=["newsletter"])
+    cfg = _cfg(mode="category_only", action="trash", categories=["newsletter"])
     report = run_once(store, FakeClassifier(_cls(category="newsletter")), j, cfg, _marker(tmp_path))
     assert report.vanished == 1 and store.labels == [] and store.moved_to_trash == []
 

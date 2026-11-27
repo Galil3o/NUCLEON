@@ -94,17 +94,19 @@ def run_once(
             meta = store.fetch_meta(ref)
             fetched = store.fetch_body(ref)  # size/structure checked before loading
             body = fetched.text
+            input_truncated = fetched.truncated
             if fetched.truncated:
                 _event(ref, "body_bytes", "truncated", lim.max_body_bytes,
                        fetched.original_bytes or 0)
             if len(body) > lim.max_model_input_chars:
                 _event(ref, "model_input", "truncated", lim.max_model_input_chars, len(body))
                 body = body[: lim.max_model_input_chars]
+                input_truncated = True
             stage = "classify"
             classification = classifier.classify(meta, body)
             stage = "gate"
             acts = gate.decide(classification, meta, cfg, store.system_folders(),
-                               contacts=contacts)
+                               contacts=contacts, input_truncated=input_truncated)
             acts, over = cap_actions(acts, lim.max_labels_per_message,
                                      lim.max_actions_per_message)
             for kind, limit, observed in over:

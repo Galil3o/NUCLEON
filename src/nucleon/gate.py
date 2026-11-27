@@ -73,6 +73,7 @@ def decide(
     cfg: Config,
     system_folders: Iterable[str] = (),
     contacts: ContactBook | None = None,
+    input_truncated: bool = False,
 ) -> list[Action]:
     system = frozenset(f.casefold() for f in system_folders)
     actions: list[Action] = [ApplyLabel(ref=meta.ref, label=l)
@@ -107,10 +108,50 @@ def decide(
             )
         )
 
-    if (
-        cfg.cleanup.auto_trash_enabled
-        and classification.category in cfg.cleanup.auto_trash_categories
-    ):
-        actions.append(DeleteToTrash(ref=meta.ref))
+    cleanup = _cleanup_action(classification, meta, cfg, system, input_truncated)
+    if cleanup is not None:
+        actions.append(cleanup)
 
     return actions
+
+
+def _cleanup_action(classification, meta, cfg, system, input_truncated):
+    """R-027 policy. Returns an ApplyLabel (candidate label), a DeleteToTrash, or None.
+
+    Default-off; a truncated classification input NEVER triggers cleanup. The deterministic
+    rules are evaluated here, over validated typed fields — never over model-controlled free
+    text, and the model never decides the action type."""
+    cc = cfg.cleanup
+    if cc.mode == "off" or input_truncated:
+        return None
+    if classification.category not in cc.categories:
+        return None
+    if cc.mode == "category_and_rules" and not _rules_pass(cc.rules, classification, meta):
+        return None
+    if cc.action == "label":
+        # The candidate label must pass the same namespace/allowlist gate as any other label.
+        if not _label_allowed(cc.candidate_label, cfg, system):
+            return None
+        return ApplyLabel(ref=meta.ref, label=cc.candidate_label)
+    return DeleteToTrash(ref=meta.ref)
+
+
+def _rules_pass(rules, classification, meta) -> bool:
+    results = [_cond_matches(c, classification, meta) for c in rules.conditions]
+    return all(results) if rules.combine == "all" else any(results)
+
+
+def _cond_matches(cond, classification, meta) -> bool:
+    vals = cond.values
+    if cond.type == "category_in":
+        return classification.category in vals
+    if cond.type == "sender_in":
+        return meta.from_addr in vals
+    if cond.type == "from_domain_in":
+        addr = (meta.from_addr or "").lower()
+        dom = addr.rsplit("@", 1)[-1] if "@" in addr else ""
+        return bool(dom) and dom in [v.lower() for v in vals]
+    if cond.type == "subject_contains":
+        subj = (meta.subject or "").lower()
+        return any(v.lower() in subj for v in vals)
+    return False  # unknown condition type never matches (fail-closed)

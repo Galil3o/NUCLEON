@@ -302,7 +302,7 @@ def test_engine_preflights_before_the_first_write_and_only_then(tmp_path):
 def test_engine_requests_move_capability_only_for_trash(tmp_path):
     store = FakeMailStore()
     store.seed_inbox(_meta(), "body")
-    cfg = _cfg(cleanup={"auto_trash_enabled": True, "auto_trash_categories": ["c"]})
+    cfg = _cfg(cleanup={"mode": "category_only", "action": "trash", "categories": ["c"]})
     run_once(store, FakeClassifier(_cls(needs_reply=False)), NullJournal(), cfg, _marker(tmp_path))
     assert store.preflight_requests[0].need_move is True
 
