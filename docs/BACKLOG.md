@@ -54,7 +54,8 @@ index keys on, how it's rebuilt, durability); likely a reviewable draft (like
 
 ---
 
-## Housekeeping done (for context, not open)
+## Notes (not open work)
 
-- Repo remotes canonicalized to `Galil3o/NUCLEON` / `Galil3o/PingPong` casing (stops the
-  push-time "repository moved" redirect notices).
+- Push-time "repository moved" notices are a harmless case redirect (`nucleon`→`NUCLEON`,
+  `pingpong`→`PingPong`); pushes succeed via the redirect. `git remote set-url` to the
+  canonical casing did not persist in these checkouts, so the notice recurs — cosmetic only.
