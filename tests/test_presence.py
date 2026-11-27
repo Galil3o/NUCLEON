@@ -242,6 +242,25 @@ def test_kit_scan_incomplete_subtree_yields_unknown():
             return []
 
     dm = datamap.DataMap()
-    dm.add_all(scanner.scan(Acc(), "/CASES"))
+    dm.add_all(scanner.scan(Acc(), "/CASES"), covered="/CASES")
     [r] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], dm, under="/CASES/Locked")
     assert r.status == "unknown"
+
+
+def test_presence_miss_outside_scanned_root_is_unknown():
+    # BOFH: a successful empty scan under /Root must NOT make a miss in the never-scanned
+    # /Other read 'absent' — the map declares its covered scope, and /Other is outside it.
+    scanner = pytest.importorskip("proton_drive_kit.scanner")
+    datamap = pytest.importorskip("proton_drive_kit.datamap")
+
+    class Acc:
+        def list_dir(self, p):
+            return []   # /Root exists and is empty, listed successfully
+
+    dm = datamap.DataMap()
+    dm.add_all(scanner.scan(Acc(), "/Root"), covered="/Root")
+    [out] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], dm, under="/Other")
+    assert out.status == "unknown"
+    # a miss INSIDE the fully-scanned empty /Root is a definite absent
+    [ins] = check_presence([Attachment("x.pdf", _sha1(b"z"), 1)], dm, under="/Root")
+    assert ins.status == "absent"

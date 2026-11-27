@@ -48,7 +48,9 @@ def parse_entry(entry: dict, parent_path: str = "") -> DriveRecord:
         uid=entry.get("uid", ""),
         parent_uid=entry.get("parentUid"),
         name=name,
-        path=(f"{parent_path}/{seg}" if parent_path else seg),
+        # Canonicalize the join: a parent_path of "/" (scanning the root) must yield "/A",
+        # never "//A", or every prefix/shield comparison on that path silently misfires.
+        path=(f"{parent_path.rstrip('/')}/{seg}" if parent_path else seg),
         is_folder=(entry.get("type") == "folder"),
         sha1=(digests.get("sha1") or None),
         sha1_verified=bool(digests.get("sha1Verified", False)),

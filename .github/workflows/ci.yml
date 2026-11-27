@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: "3.13"
       - name: Install bandit
-        run: pip install bandit
+        run: pip install bandit==1.9.4   # pinned for reproducible gate findings
       # R-030 (security half): fail CI on any medium-or-higher bandit finding in shipping
       # code. Low-severity findings (asserts, controlled subprocess calls) are not gated;
       # tests are not scanned. The ruff style/lint gate is tracked separately.

@@ -43,3 +43,10 @@ def test_parse_listing_parses_json_string_and_list():
     import json
     recs = parse_listing(json.dumps(LISTING), parent_path="/my-files")
     assert [r.name for r in recs] == ["FOLDER-A", "notes.txt"]
+
+
+def test_root_parent_path_does_not_double_slash():
+    # BOFH: listing the root "/" built "//A"; the join must canonicalize to "/A" so prefix
+    # and shield comparisons on the path do not silently misfire.
+    r = parse_entry({"uid": "u", "name": "A", "type": "folder"}, parent_path="/")
+    assert r.path == "/A"

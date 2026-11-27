@@ -74,15 +74,33 @@ def test_add_all_captures_incomplete_scopes_for_coverage():
     # report 'unknown' (not 'absent') for a miss inside it. Good records still index.
     m = DataMap()
     m.add_all([rec("/r/case/doc.pdf", S1),
-               ScanIncomplete(path="/r/locked", uid="UL", reason="list_error")])
+               ScanIncomplete(path="/r/locked", uid="UL", reason="list_error")],
+              covered="/")
     assert m.contains_sha1(S1) == ["/r/case/doc.pdf"]
-    assert m.coverage_incomplete() is True                 # whole map
+    assert m.coverage_incomplete() is True                 # whole map (a region is incomplete)
     assert m.coverage_incomplete("/r/locked") is True       # the un-scanned folder itself
     assert m.coverage_incomplete("/r/locked/sub") is True    # a query inside the un-scanned region
     assert m.coverage_incomplete("/r/case") is False         # disjoint sibling: not forced unknown
 
 
-def test_coverage_complete_when_no_incomplete_markers():
-    m = DataMap(); m.add(rec("/a/x.pdf", S1))
+def test_coverage_complete_when_covered_and_no_incomplete():
+    m = DataMap(); m.add(rec("/a/x.pdf", S1)); m.declare_covered("/")
     assert m.coverage_incomplete() is False
     assert m.coverage_incomplete("/a") is False
+
+
+def test_no_declared_coverage_means_everything_unknown():
+    # BOFH: the map stores gaps but, without a declared covered scope, proves nothing — a
+    # miss cannot be 'absent' because the map never claimed to have scanned there.
+    m = DataMap(); m.add(rec("/a/x.pdf", S1))
+    assert m.coverage_incomplete() is True
+    assert m.coverage_incomplete("/a") is True
+
+
+def test_query_outside_covered_scope_is_incomplete():
+    m = DataMap()
+    m.add_all([rec("/Root/x.pdf", S1)], covered="/Root")
+    assert m.coverage_incomplete("/Root") is False        # positively scanned
+    assert m.coverage_incomplete("/Root/sub") is False     # within the scanned scope
+    assert m.coverage_incomplete("/Other") is True         # never scanned -> unknown
+    assert m.coverage_incomplete(None) is True             # a /Root scan does not prove the whole tree
