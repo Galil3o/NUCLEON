@@ -76,6 +76,27 @@ v0.3.0-alpha) once the owner says go and the reviewer has re-checked the post-ba
 
 ---
 
+## Red-team pass · v1.0 gate (owner decision deferred to the v1.0 cutover)
+
+**Status:** scheduled for the v1.0 cutover, not now. The lightweight posture holds until then:
+the BOFH is the adversarial (red) reviewer; the codebase invariants (fail-closed, no expunge,
+reversibility, the honesty contracts, the gate as the security boundary) are the blue posture.
+**At v1.0 (before any live enablement on the real mailbox):** decide whether to run an
+additional one-time, dedicated **red-team pass** on the security-sensitive surface (gate,
+delete/trash path, LLM quarantine, fail-closed archive) — ideally an adversarial prompt seeded
+with public attack-pattern / security-test repos — that must pass before go-live. This is where
+the real red-team value sits; owner to confirm scope at the cutover.
+
+## CI security stack (what's in Git vs. owner settings)
+
+**In Git (committed):** bandit medium+ gate (`040c70a`), CodeQL `security-extended` (public =
+free), Dependabot (pip + github-actions), Claude security-review action (skips until its secret
+is set). **Owner settings steps (one-time, only the owner can do):** enable Secret Scanning +
+push protection (all repos); enable Dependabot alerts / security updates; add the `CLAUDE_API_KEY`
+repo secret to activate the Claude review; if GitHub reports a CodeQL "default setup" conflict,
+turn default setup off so the committed advanced workflow (ours, pinned) runs. CodeQL is free only
+on the public repo (NUCLEON); on a private repo it needs paid GitHub Advanced Security.
+
 ## Notes (not open work)
 
 - Push-time "repository moved" notices are a harmless case redirect (`nucleon`→`NUCLEON`,

@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Keep the SHA-pinned GitHub Actions (R-029) fresh with readable version bumps.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  # Python dependencies (currently few; this catches a vulnerable transitive pin early).
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"

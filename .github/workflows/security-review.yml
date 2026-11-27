@@ -1,0 +1,40 @@
+name: Security Review (Claude)
+
+# Anthropic's claude-code-security-review runs a Claude security pass on each PR and posts
+# findings as PR comments. It is NOT hardened against prompt injection and is intended for
+# TRUSTED PRs only (here: only the owner and Claude push), so we leave it on pull_request.
+# It stays GREEN (skips) until the CLAUDE_API_KEY repository secret is configured, so it can
+# never red-flag a PR before the key is set.
+
+permissions:
+  pull-requests: write
+  contents: read
+
+on:
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for API key
+        id: key
+        env:
+          CLAUDE_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: |
+          if [ -n "$CLAUDE_API_KEY" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::CLAUDE_API_KEY secret not set — Claude security review skipped. Add the secret to enable it."
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        if: steps.key.outputs.present == 'true'
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 2
+      - uses: anthropics/claude-code-security-review@0c6a49f1fa56a1d472575da86a94dbc1edb78eda # main @ 2026-11-27
+        if: steps.key.outputs.present == 'true'
+        with:
+          comment-pr: true
+          claude-api-key: ${{ secrets.CLAUDE_API_KEY }}
