@@ -96,7 +96,10 @@ the real red-team value sits; owner to confirm scope at the cutover.
 free), Dependabot (pip + github-actions), Claude security-review action (skips until its secret
 is set). **Owner settings steps (one-time, only the owner can do):** enable Secret Scanning +
 push protection (all repos); enable Dependabot alerts / security updates; add the `CLAUDE_API_KEY`
-repo secret to activate the Claude review; if GitHub reports a CodeQL "default setup" conflict,
+repo secret to activate the Claude review (BOFH activation caution: the `same-repo` guard
+excludes forks but does NOT pin approval to an immutable PR head — once the secret exists, a
+later push into the same allowed PR can re-trigger the job on new content; before activating,
+bind the run to an approved head and keep the PR-comment output separately limited); if GitHub reports a CodeQL "default setup" conflict,
 turn default setup off so the committed advanced workflow (ours, pinned) runs. CodeQL is free only
 on the public repo (NUCLEON); on a private repo it needs paid GitHub Advanced Security.
 
