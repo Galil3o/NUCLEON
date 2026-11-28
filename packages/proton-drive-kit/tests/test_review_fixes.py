@@ -45,3 +45,45 @@ def test_parse_listing_rejects_list_of_non_objects():
 def test_access_wraps_list_of_non_objects_as_access_error():
     with pytest.raises(DriveAccessError):
         DriveAccess(runner=lambda p: "[1, 2, 3]").list_dir("/x")
+
+
+# R-019 — a single malformed entry (unexpected field types) must surface as ListingError,
+# never crash the walk with an AttributeError (which would abort the whole scan on one bad
+# subfolder, and — via the empty result — be misread as "folder empty" by the presence check).
+def test_r019_numeric_name_is_listing_error_not_attributeerror():
+    with pytest.raises(ListingError):
+        parse_entry({"uid": "u", "name": 123, "type": "file"})
+
+
+def test_r019_name_value_non_string_is_listing_error():
+    with pytest.raises(ListingError):
+        parse_entry({"uid": "u", "name": {"value": 5}, "type": "file"})
+
+
+def test_r019_active_revision_as_array_is_listing_error():
+    with pytest.raises(ListingError):
+        parse_entry({"uid": "u", "name": "x", "type": "file", "activeRevision": [1, 2]})
+
+
+def test_r019_claimed_digests_as_array_is_listing_error():
+    with pytest.raises(ListingError):
+        parse_entry({"uid": "u", "name": "x", "type": "file",
+                     "activeRevision": {"claimedDigests": [1]}})
+
+
+def test_r019_non_string_sha1_is_listing_error():
+    with pytest.raises(ListingError):
+        parse_entry({"uid": "u", "name": "x", "type": "file",
+                     "activeRevision": {"claimedDigests": {"sha1": 123}}})
+
+
+def test_r019_non_string_modification_time_is_listing_error():
+    with pytest.raises(ListingError):
+        parse_entry({"uid": "u", "name": "x", "type": "file", "modificationTime": 99})
+
+
+def test_r019_bad_entry_inside_listing_surfaces_as_access_error():
+    # access.py translates ListingError -> DriveAccessError; a single bad entry must ride that
+    # same path, not escape as an AttributeError that aborts the scan.
+    with pytest.raises(DriveAccessError):
+        DriveAccess(runner=lambda p: '[{"uid":"u","name":123,"type":"file"}]').list_dir("/x")

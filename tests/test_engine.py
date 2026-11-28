@@ -344,6 +344,26 @@ def test_r005_limit_zero_processes_nothing(tmp_path):
     assert r.processed == 0 and store.labels == []
 
 
+def test_r024_action_cap_does_not_shrink_the_message_limit(tmp_path):
+    """R-024: a per-message label/action cap must not corrupt the run's MESSAGE budget.
+    The overrun-reporting loop re-bound the name ``limit`` (the message budget), so a
+    single capped message made the whole run stop after only a couple of messages."""
+    store = FakeMailStore()
+    for uid in (1, 2, 3, 4, 5):
+        store.seed_inbox(_meta(uid=uid, mid="<m%d@x>" % uid), "body")
+    # 3 labels per message, capped at 2 -> every message produces a "labels" overrun.
+    clf = FakeClassifier(_cls(labels=["nucleon/a", "nucleon/b", "nucleon/c"]))
+    cfg = _cfg()
+    cfg = cfg.model_copy(update={
+        "mail": cfg.mail.model_copy(update={"limit": 10}),
+        "limits": cfg.limits.model_copy(update={"max_labels_per_message": 2}),
+    })
+    report = run_once(store, clf, NullJournal(), cfg, _marker(tmp_path))
+    assert report.processed == 5  # all five, NOT cut short to 2 by the action cap
+    assert {r.uid for r, _ in store.labels} == {1, 2, 3, 4, 5}
+    assert len(report.budget_events) == 5  # exactly one labels-overrun per message
+
+
 # -- R-004: partial actions, stable draft reference, read-only diagnosis -------
 class _WriteGuard:
     """Wraps a store; every mailbox WRITE raises, reads pass through (and are logged)."""

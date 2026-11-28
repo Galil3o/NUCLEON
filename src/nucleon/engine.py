@@ -109,8 +109,10 @@ def run_once(
                                contacts=contacts, input_truncated=input_truncated)
             acts, over = cap_actions(acts, lim.max_labels_per_message,
                                      lim.max_actions_per_message)
-            for kind, limit, observed in over:
-                _event(ref, kind, "truncated", limit, observed)
+            # R-024: distinct name — the overrun report must NOT re-bind the run's
+            # message budget `limit`, or one capped message shrinks the whole run.
+            for kind, ev_limit, observed in over:
+                _event(ref, kind, "truncated", ev_limit, observed)
             stage = "act"
             did_draft = did_trash = False
             n_labeled = 0
