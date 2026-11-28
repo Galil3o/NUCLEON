@@ -37,6 +37,15 @@ DEFAULT_COPY_PATTERNS: tuple[str, ...] = (
     r"\bkopie\b", r"\bcopy\b", r"copy_of", r"\.tmp$", r"autorecover", r"vf-?drop",
 )
 
+_SHA1_RE = re.compile(r"\A[0-9a-fA-F]{40}\Z")
+
+
+def _norm_sha1(value):
+    """Lowercased 40-hex content digest, or None if absent/malformed. A non-comparable digest
+    (missing, 'unknown', wrong length) is never proof of identical content, so it must not form
+    a duplicate group or drive a delete proposal."""
+    return value.lower() if value and _SHA1_RE.match(value) else None
+
 
 @dataclass(frozen=True)
 class DedupDecision:
@@ -81,9 +90,12 @@ def find_duplicate_groups(records: Iterable[DriveRecord]) -> dict[str, list[Driv
     a sha1 whose records disagree on size, or have an unknown size, is dropped."""
     groups: dict[str, list[DriveRecord]] = {}
     for r in _unique(records):
-        if r.is_folder or not r.sha1:
+        if r.is_folder:
             continue
-        groups.setdefault(r.sha1, []).append(r)
+        key = _norm_sha1(r.sha1)
+        if key is None:
+            continue  # non-comparable digest (missing/malformed) is never proof of identity
+        groups.setdefault(key, []).append(r)
     out: dict[str, list[DriveRecord]] = {}
     for sha1, recs in groups.items():
         if len(recs) < 2:

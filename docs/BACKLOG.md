@@ -70,9 +70,12 @@ Touches operational drive-scan tooling + live data → do under supervision, wit
 
 ## main consolidation · gated on review
 
-**Status:** NEEDS-OWNER + a fresh BOFH pass on the latest `claude/v0.3-drive-seam` HEAD.
-Merge `claude/v0.2` and `claude/v0.3-drive-seam` cleanly to `main` and tag (v0.2.0 /
-v0.3.0-alpha) once the owner says go and the reviewer has re-checked the post-batch commits.
+**Status:** NEEDS-OWNER — the dev branches share **no common git ancestor with `main`** (the
+privacy history-rewrite created a fresh history), so a normal `git merge` is impossible. The
+owner decides the integration strategy (reset `main` to the v0.3 candidate / squash onto `main`
+/ `merge --allow-unrelated-histories`) and the exact candidate SHA, checked against `main`.
+Decided tag: **`v0.3.1`** (not v1.0 — the core is not live-accepted yet); package metadata set to
+0.3.1. `claude/v0.2` is fully contained in `claude/v0.3-drive-seam`.
 
 ---
 

@@ -16,6 +16,10 @@ on:
 jobs:
   security:
     runs-on: ubuntu-latest
+    # Trusted-PR enforcement (BOFH): run ONLY on PRs from this same repository, never forks.
+    # The action sends PR content to an external analyzer and is not hardened against prompt
+    # injection, so an untrusted (fork) PR must never trigger it.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     steps:
       - name: Check for API key
         id: key
